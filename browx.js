@@ -31,16 +31,15 @@ const duration = parseInt(process.argv[6]);
 let totalSolves = 0;
 
 // Utility functions
-function generateRandomString(minLength, maxLength) {
+const generateRandomString = (minLength, maxLength) => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
-    const randomStringArray = Array.from({ length }, () => {
-        const randomIndex = Math.floor(Math.random() * characters.length);
-        return characters[randomIndex];
-    });
-    return randomStringArray.join('');
-}
-const validkey = generateRandomString(5, 10);
+    return Array.from({ length }, () => 
+        characters[Math.floor(Math.random() * characters.length)]
+    ).join('');
+};
+
+const validKey = generateRandomString(5, 10);
 
 const readProxies = (filePath) => {
     try {
@@ -317,17 +316,10 @@ const detectChallenge = async (browser, page, browserProxy) => {
                     hesitationChance: 0.3
                 });
                 await captchaContainer.click();
-                await captchaContainer.click({ offset: { x: 17, y: 20.5 } });
-                await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }).catch(() => {
-                });
-            }
-        }
-        await sleep(2);
-    } catch (error) {
-        throw error;
+
                 await page.waitForFunction(
                     () => !document.querySelector('body > div.main-wrapper > div > div > div > div'),
-                    { timeout: 30000 }
+                    { timeout: 45000 }
                 );
 
                 const newTitle = await page.title();
