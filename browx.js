@@ -295,10 +295,7 @@ const detectChallenge = async (browser, page, browserProxy) => {
         const title = await page.title();
         const content = await page.content();
 
-        if (title === 'Attention Required! | Cloudflare') ||
-                        return title.includes('Just a moment') || 
-                                   title.includes('Checking your browser') ||
-                                   title === 'Just a moment...') {
+        if (title === 'Attention Required! | Cloudflare') {
             coloredLog(COLORS.RED, `[INFO] Proxy blocked: ${maskProxy(browserProxy)}`);
             throw new Error('Proxy blocked');
         }
