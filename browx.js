@@ -16,21 +16,47 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// ========== ENHANCED FIREWALL BYPASS TECHNIQUES ==========
+// ========== AGGRESSIVE HUMAN SIMULATION BYPASS ==========
 const bypassFirewall = async (page) => {
     await page.evaluateOnNewDocument(() => {
-        // Remove automation indicators
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        // Remove all automation indicators
+        delete navigator.__proto__.webdriver;
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'plugins', { 
+            get: () => [
+                {0: {type: "application/x-google-chrome-pdf"}, name: "Chrome PDF Plugin", filename: "internal-pdf-viewer", description: "Portable Document Format"},
+                {0: {type: "application/pdf"}, name: "Chrome PDF Viewer", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", description: "Portable Document Format"}
+            ] 
+        });
         Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         
-        // Mock Chrome runtime
+        // Mock Chrome runtime completely
         window.chrome = { 
-            runtime: {}, 
-            loadTimes: () => {}, 
-            csi: () => {}, 
-            app: {},
-            webstore: {}
+            runtime: {
+                connect: () => ({onMessage: {addListener: () => {}}, postMessage: () => {}, onDisconnect: {addListener: () => {}}}),
+                sendMessage: () => {},
+                onMessage: {addListener: () => {}},
+                onConnect: {addListener: () => {}},
+                getManifest: () => ({})
+            }, 
+            loadTimes: () => ({
+                finishDocumentLoadTime: 0,
+                finishLoadTime: 0,
+                firstPaintTime: 0,
+                requestTime: 0,
+                startLoadTime: 0,
+                commitLoadTime: 0
+            }), 
+            csi: () => ({onloadT: 0, startE: 0, pageT: 0}), 
+            app: {
+                isInstalled: false,
+                InstallState: {DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed'},
+                RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'}
+            },
+            webstore: {
+                onInstallStageChanged: {addListener: () => {}},
+                onDownloadProgress: {addListener: () => {}}
+            }
         };
         
         // Override permissions API
@@ -41,60 +67,97 @@ const bypassFirewall = async (page) => {
                 originalQuery(parameters)
         );
 
-        // Spoof audio context
-        const originalGetChannelData = AudioBuffer.prototype.getChannelData;
-        AudioBuffer.prototype.getChannelData = function() {
-            const result = originalGetChannelData.apply(this, arguments);
-            for (let i = 0; i < result.length; i++) {
-                result[i] += (Math.random() * 0.0001) - 0.00005;
-            }
-            return result;
+        // Advanced audio context spoofing
+        const originalCreateOscillator = AudioContext.prototype.createOscillator;
+        AudioContext.prototype.createOscillator = function() {
+            const oscillator = originalCreateOscillator.apply(this, arguments);
+            const originalFrequency = oscillator.frequency;
+            Object.defineProperty(oscillator.frequency, 'value', {
+                get: () => originalFrequency.value,
+                set: (value) => { originalFrequency.value = value + (Math.random() * 0.1 - 0.05); }
+            });
+            return oscillator;
         };
 
-        // Spoof WebGL
+        // Advanced WebGL spoofing
         const getParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(parameter) {
             if (parameter === 37445) return 'Intel Inc.';
             if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+            if (parameter === 34076) return 'Google Inc. (Google)';
+            if (parameter === 34077) return 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)';
             return getParameter.apply(this, arguments);
         };
 
-        // Bypass automation detection
-        Object.defineProperty(navigator, 'hardwareConcurrency', { value: 4 });
-        Object.defineProperty(navigator, 'deviceMemory', { value: 4 });
+        // Remove all headless detection patterns
+        Object.defineProperty(navigator, 'hardwareConcurrency', { value: 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { value: 8 });
+        Object.defineProperty(navigator, 'maxTouchPoints', { value: 5 });
         
-        // Remove headless detection patterns
-        Object.defineProperty(document, 'hidden', { value: false });
-        Object.defineProperty(document, 'visibilityState', { value: 'visible' });
+        Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+        Object.defineProperty(document, 'webkitVisibilityState', { value: 'visible', configurable: true });
         
-        // Spoof timezone
+        // Spoof timezone and locale
         Object.defineProperty(Intl, 'DateTimeFormat', {
             value: class extends Intl.DateTimeFormat {
                 constructor(locales, options) {
-                    if (options && options.timeZone === 'UTC') {
+                    if (options && options.timeZone) {
                         return super(locales, { ...options, timeZone: 'America/New_York' });
                     }
                     return super(locales, options);
                 }
             }
         });
+
+        // Remove automation properties from window
+        delete window.__webdriver_evaluate;
+        delete window.__selenium_evaluate;
+        delete window.__webdriver_script_function;
+        delete window.__webdriver_script_func;
+        delete window.__webdriver_script_fn;
+        delete window._Selenium_IDE_Recorder;
+        delete window._selenium;
+        delete window.callPhantom;
+        delete window.callSelenium;
+        delete window.phantom;
+        delete window.webdriver;
+        delete window.selenium;
+        delete window._phantom;
+
+        // Spoof performance metrics
+        Object.defineProperty(performance, 'memory', {
+            value: {
+                jsHeapSizeLimit: 4294705152,
+                totalJSHeapSize: 23200000,
+                usedJSHeapSize: 18200000
+            }
+        });
     });
 };
 
 const getFirewallBypassArgs = () => [
-    '--disable-features=site-per-process',
-    '--disable-ipc-flooding-protection', 
-    '--disable-backgrounding-occluded-windows',
     '--disable-background-timer-throttling',
-    '--disable-default-apps',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-breakpad',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-dev-shm-usage',
     '--disable-extensions',
+    '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+    '--disable-ipc-flooding-protection',
+    '--disable-renderer-backgrounding',
+    '--disable-site-isolation-trials',
+    '--enable-features=NetworkService,NetworkServiceInProcess',
+    '--hide-scrollbars',
+    '--no-default-browser-check',
+    '--no-first-run',
+    '--disable-default-apps',
     '--disable-translate',
     '--disable-web-security',
     '--disable-xss-auditor',
     '--no-pings',
     '--use-gl=swiftshader',
     '--disable-software-rasterizer',
-    '--no-default-browser-check',
     '--disable-background-networking',
     '--disable-client-side-phishing-detection',
     '--disable-sync',
@@ -102,10 +165,8 @@ const getFirewallBypassArgs = () => [
     '--disable-prompt-on-repost',
     '--disable-domain-reliability',
     '--disable-component-update',
-    '--disable-features=TranslateUI,BlinkGenPropertyTrees,site-per-process',
     '--aggressive-cache-discard',
     '--max_old_space_size=4096',
-    '--disable-site-isolation-trials',
     '--disable-2d-canvas-clip-aa',
     '--disable-2d-canvas-image-chromium',
     '--disable-3d-apis',
@@ -115,7 +176,6 @@ const getFirewallBypassArgs = () => [
     '--disable-app-list-dismiss-on-blur',
     '--disable-accelerated-video-decode',
     '--disable-browser-side-navigation',
-    '--disable-component-extensions-with-background-pages',
     '--disable-databases',
     '--disable-es3-apis',
     '--disable-es3-gl-context',
@@ -127,11 +187,9 @@ const getFirewallBypassArgs = () => [
     '--disable-offer-store-unmasked-wallet-cards',
     '--disable-offer-upload-credit-cards',
     '--disable-pepper-3d',
-    '--disable-prompt-on-repost',
     '--disable-reading-from-canvas',
     '--disable-remote-fonts',
     '--disable-speech-api',
-    '--disable-sync',
     '--disable-threaded-animation',
     '--disable-threaded-scrolling',
     '--disable-web-gl',
@@ -139,82 +197,164 @@ const getFirewallBypassArgs = () => [
     '--disable-webgl2',
     '--enable-aggressive-domstorage-flushing',
     '--enable-unsafe-swiftshader',
-    '--hide-scrollbars',
     '--ignore-gpu-blacklist',
     '--metrics-recording-only',
     '--mute-audio',
-    '--no-first-run',
-    '--no-sandbox',
-    '--no-zygote',
     '--password-store=basic',
     '--use-mock-keychain',
-    '--disable-dev-shm-usage'
+    '--no-zygote',
+    '--single-process'
 ];
 
-// Enhanced challenge detection and solving
+// AGGRESSIVE CHALLENGE SOLVING
 const solveAdvancedChallenge = async (page, browserProxy) => {
     try {
-        // Wait for potential challenge to load
-        await page.waitForTimeout(3000);
+        // Extended initial wait
+        await page.waitForTimeout(5000 + Math.random() * 3000);
         
-        const url = page.url();
+        const currentUrl = page.url();
         const title = await page.title();
         const content = await page.content();
-        
-        // Check for various challenge types
-        if (title.includes('Just a moment') || 
-            title.includes('Checking your browser') ||
-            content.includes('challenge-platform') ||
-            content.includes('cf-browser-verification') ||
-            url.includes('challenges.cloudflare.com')) {
-            
-            // Multiple solving strategies
-            await page.waitForTimeout(2000);
-            
-            // Strategy 1: Wait for auto-redirect
+
+        // Check for challenge presence
+        const isChallenge = title.includes('Just a moment') || 
+                           title.includes('Checking your browser') ||
+                           content.includes('challenge-platform') ||
+                           content.includes('cf-browser-verification') ||
+                           currentUrl.includes('challenges.cloudflare.com') ||
+                           content.includes('Enable JavaScript and cookies to continue');
+
+        if (!isChallenge) {
+            return true; // No challenge detected
+        }
+
+        coloredLog(COLORS.WHITE, `[INFO] Detected challenge, solving for proxy: ${maskProxy(browserProxy)}`);
+
+        // STRATEGY 1: Wait for auto-solve (most common)
+        try {
+            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 25000 });
+            coloredLog(COLORS.GREEN, `[INFO] Challenge auto-solved for proxy: ${maskProxy(browserProxy)}`);
+            return true;
+        } catch (e) {}
+
+        // STRATEGY 2: Interactive element click
+        const clickSelectors = [
+            'input[type="submit"]',
+            'button',
+            '.btn',
+            '#challenge-submit',
+            '[type="submit"]',
+            'input[value="Submit"]',
+            'a[href*="challenge"]',
+            '.cf-btn',
+            '.success',
+            '#success'
+        ];
+
+        for (const selector of clickSelectors) {
             try {
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
-                return true;
-            } catch (e) {}
-            
-            // Strategy 2: Look for challenge iframe and interact
-            const challengeFrame = await page.$('iframe[src*="challenges"]');
-            if (challengeFrame) {
-                const frame = await challengeFrame.contentFrame();
-                if (frame) {
-                    // Click on any interactive element
-                    const button = await frame.$('input[type="submit"], button, .btn, #challenge-submit');
-                    if (button) {
-                        await button.click();
-                        await page.waitForTimeout(5000);
+                const element = await page.$(selector);
+                if (element) {
+                    await element.click();
+                    await page.waitForTimeout(3000);
+                    try {
+                        await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 });
+                        coloredLog(COLORS.GREEN, `[INFO] Challenge solved via click (${selector}) for proxy: ${maskProxy(browserProxy)}`);
                         return true;
+                    } catch (e) {}
+                }
+            } catch (e) {}
+        }
+
+        // STRATEGY 3: Advanced human simulation
+        await page.waitForTimeout(2000);
+        
+        // Complex mouse movements
+        const viewport = page.viewport();
+        for (let i = 0; i < 5; i++) {
+            const x = Math.random() * viewport.width * 0.8 + viewport.width * 0.1;
+            const y = Math.random() * viewport.height * 0.8 + viewport.height * 0.1;
+            await page.mouse.move(x, y, { steps: 20 + Math.floor(Math.random() * 10) });
+            await page.waitForTimeout(500 + Math.random() * 500);
+        }
+
+        // Scroll behavior
+        await page.evaluate(() => {
+            window.scrollTo(0, 200 + Math.random() * 400);
+        });
+        await page.waitForTimeout(1000 + Math.random() * 1000);
+
+        // STRATEGY 4: Form field interaction
+        const inputSelectors = ['input[type="text"]', 'input[type="email"]', 'textarea', 'input[name="answer"]'];
+        for (const selector of inputSelectors) {
+            try {
+                const input = await page.$(selector);
+                if (input) {
+                    await input.click({ delay: 50 + Math.random() * 100 });
+                    await page.waitForTimeout(500);
+                    await input.type('test', { delay: 80 + Math.random() * 120 });
+                    await page.waitForTimeout(1000);
+                    
+                    // Look for submit button after filling
+                    for (const submitSelector of clickSelectors) {
+                        try {
+                            const submit = await page.$(submitSelector);
+                            if (submit) {
+                                await submit.click();
+                                await page.waitForTimeout(5000);
+                                try {
+                                    await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 });
+                                    coloredLog(COLORS.GREEN, `[INFO] Challenge solved via form (${selector}) for proxy: ${maskProxy(browserProxy)}`);
+                                    return true;
+                                } catch (e) {}
+                            }
+                        } catch (e) {}
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // STRATEGY 5: Iframe interaction
+        try {
+            const frameElement = await page.$('iframe[src*="challenge"]');
+            if (frameElement) {
+                const frame = await frameElement.contentFrame();
+                if (frame) {
+                    const frameButton = await frame.$('button, input[type="submit"]');
+                    if (frameButton) {
+                        await frameButton.click();
+                        await page.waitForTimeout(8000);
+                        try {
+                            await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 15000 });
+                            coloredLog(COLORS.GREEN, `[INFO] Challenge solved via iframe for proxy: ${maskProxy(browserProxy)}`);
+                            return true;
+                        } catch (e) {}
                     }
                 }
             }
-            
-            // Strategy 3: Direct form interaction
-            const submitButton = await page.$('input[type="submit"], button, .btn, #challenge-submit');
-            if (submitButton) {
-                await submitButton.click();
-                await page.waitForTimeout(5000);
-                return true;
-            }
-            
-            // Strategy 4: Simulate more human behavior
-            await page.mouse.move(100, 100);
-            await page.waitForTimeout(1000);
-            await page.mouse.move(200, 200);
-            await page.waitForTimeout(1000);
-            await page.mouse.click(150, 150);
-            await page.waitForTimeout(3000);
+        } catch (e) {}
+
+        // STRATEGY 6: Final attempt - refresh and retry
+        await page.waitForTimeout(3000);
+        await page.reload({ waitUntil: 'networkidle0' });
+        await page.waitForTimeout(8000);
+
+        // Check if challenge is gone after reload
+        const newTitle = await page.title();
+        if (!newTitle.includes('Just a moment') && !newTitle.includes('Checking your browser')) {
+            coloredLog(COLORS.GREEN, `[INFO] Challenge solved after reload for proxy: ${maskProxy(browserProxy)}`);
+            return true;
         }
-        
-        return true;
+
+        coloredLog(COLORS.RED, `[INFO] All challenge solving strategies failed for proxy: ${maskProxy(browserProxy)}`);
+        return false;
+
     } catch (error) {
+        coloredLog(COLORS.RED, `[INFO] Challenge solving error for proxy ${maskProxy(browserProxy)}: ${error.message}`);
         return false;
     }
 };
-// ========== END ENHANCED FIREWALL BYPASS ==========
+// ========== END AGGRESSIVE HUMAN SIMULATION BYPASS ==========
 
 // Command-line argument validation
 if (process.argv.length < 6) {
@@ -499,7 +639,7 @@ const detectChallenge = async (browser, page, browserProxy) => {
             throw new Error('Proxy blocked');
         }
 
-        // Use enhanced challenge solver
+        // Use aggressive challenge solver
         const challengeSolved = await solveAdvancedChallenge(page, browserProxy);
         
         if (!challengeSolved) {
@@ -507,7 +647,7 @@ const detectChallenge = async (browser, page, browserProxy) => {
             throw new Error('Challenge bypass failed');
         }
 
-        await sleep(5);
+        await sleep(3);
     } catch (error) {
         throw error;
     }
@@ -553,7 +693,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
             '--force-color-profile=srgb',
             '--enable-quic',
             '--enable-features=PostQuantumKyber',
-            // ========== ENHANCED FIREWALL BYPASS ARGS ==========
+            // ========== AGGRESSIVE FIREWALL BYPASS ARGS ==========
             ...getFirewallBypassArgs()
         ],
         defaultViewport: {
@@ -573,7 +713,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
         const client = page._client();
 
         await spoofFingerprint(page);
-        // ========== ENHANCED FIREWALL BYPASS ==========
+        // ========== AGGRESSIVE FIREWALL BYPASS ==========
         await bypassFirewall(page);
 
         page.on('framenavigated', (frame) => {
@@ -582,8 +722,8 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
             }
         });
 
-        page.setDefaultNavigationTimeout(60 * 1000);
-        await page.goto(targetURL, { waitUntil: 'domcontentloaded' });
+        page.setDefaultNavigationTimeout(90 * 1000);
+        await page.goto(targetURL, { waitUntil: 'networkidle0', timeout: 90000 });
 
         const bodyHandle = await page.$('body');
         if (bodyHandle) {
@@ -593,7 +733,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
         await simulateNaturalPageBehavior(page);
         await detectChallenge(browser, page, browserProxy);
 
-        await sleep(5);
+        await sleep(3);
 
         const title = await page.title();
         const cookies = await page.cookies(targetURL);
