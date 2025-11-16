@@ -50,7 +50,8 @@ const getBrowserArgs = () => [
     '--ignore-ssl-errors',
     '--disable-web-security',
     '--disable-features=site-per-process',
-    '--window-size=1920,1080'
+    '--window-size=1920,1080',
+    '--headless=new' // Headless mode untuk server
 ];
 
 // CLOUDFLARE SOLVER - FOLLOW THE EXACT FLOW
@@ -225,16 +226,17 @@ const randomElement = (array) => array[Math.floor(Math.random() * array.length)]
 // User agents
 const userAgents = [
     `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
-    `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
+    `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
+    `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
 ];
 
-// Browser launcher
+// Browser launcher - FIXED FOR SERVER ENVIRONMENT
 const launchBrowser = async (targetURL, proxy, attempt = 1) => {
     const userAgent = randomElement(userAgents);
     let browser;
 
     const options = {
-        headless: false, // Set to true for production
+        headless: true, // HEADLESS TRUE untuk server environment
         args: [
             `--user-agent=${userAgent}`,
             ...getBrowserArgs()
@@ -372,7 +374,7 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-log('READY', 'Cloudflare Solver Started - Sending ONLY Cloudflare Cookies to Flood', 'GREEN');
+log('READY', 'Cloudflare Solver Started - HEADLESS MODE - Sending ONLY Cloudflare Cookies to Flood', 'GREEN');
 main().catch(error => {
     log('ERROR', error.message, 'RED');
     process.exit(1);
